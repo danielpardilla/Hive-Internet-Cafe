@@ -1,0 +1,541 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Hive Interet Café — Client</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/icms.css') }}">
+  <style>
+    body { background: linear-gradient(135deg,#d8e1e8 0%,#c6d3e3 100%); min-height:100vh; }
+    .client-wrap { max-width: 780px; margin: 0 auto; padding: 20px 16px; display: flex; flex-direction: column; gap: 16px; }
+
+    /* Timer */
+    .timer-display { font-size:3.8rem; font-weight:700; color:var(--primary); font-family:'Courier New',monospace; letter-spacing:.05em; }
+    .status-pill { display:inline-flex; align-items:center; gap:8px; padding:6px 20px; border-radius:30px; font-size:.875rem; font-weight:600; }
+    .status-pill.waiting { background:#feebc8; color:#c05621; }
+    .status-pill.active  { background:#c6f6d5; color:#276749; }
+    .status-pill.ended   { background:#fed7d7; color:#c53030; }
+    .info-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:10px; margin-top:18px; }
+    .info-tile { background:var(--surface); border-radius:var(--radius); padding:14px 10px; text-align:center; }
+    .info-tile .label { font-size:.68rem; color:var(--text-light); text-transform:uppercase; letter-spacing:.06em; margin-bottom:4px; }
+    .info-tile .value  { font-size:1.15rem; font-weight:700; color:var(--primary); }
+
+    /* Print card */
+    .print-card-inner { background:var(--white); border-radius:var(--radius-lg); overflow:hidden; box-shadow:var(--shadow); }
+    .print-card-header { background:var(--grad-primary); padding:16px 20px; display:flex; align-items:center; justify-content:space-between; }
+    .print-card-header h3 { color:#fff; margin:0; font-size:1rem; }
+    .rate-pill { background:rgba(255,255,255,.18); color:#fff; padding:3px 10px; border-radius:12px; font-size:.72rem; font-weight:700; }
+    .print-card-body { padding:20px; }
+
+    /* Drop zone */
+    .drop-zone {
+      border: 2px dashed var(--accent); border-radius: var(--radius-lg);
+      padding: 28px 20px; text-align: center; cursor: pointer; transition: all .2s;
+      background: #f8fafc;
+    }
+    .drop-zone:hover, .drop-zone.drag-over { border-color:var(--secondary); background:var(--surface); }
+    .drop-zone.has-file { border-color:var(--primary); background:#f0f4f8; }
+    .drop-zone input { display:none; }
+    .dz-icon { display:block; margin:0 auto 8px; }
+    .selected-file-info { display:flex; align-items:center; gap:10px; margin-top:12px; padding:10px 14px; background:var(--surface); border-radius:var(--radius); }
+    .sf-icon { width:36px; height:36px; border-radius:8px; display:flex; align-items:center; justify-content:center; font-size:.65rem; font-weight:700; flex-shrink:0; }
+    .sf-pdf  { background:#fee2e2; color:#c53030; }
+    .sf-docx { background:#dbeafe; color:#1e40af; }
+    .sf-img  { background:#d1fae5; color:#065f46; }
+    .sf-name { flex:1; font-size:.875rem; font-weight:600; color:var(--primary); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .sf-size { font-size:.75rem; color:var(--text-light); white-space:nowrap; }
+    .sf-remove { background:none; border:none; cursor:pointer; color:var(--danger); font-size:1.1rem; padding:2px 6px; border-radius:4px; }
+    .sf-remove:hover { background:#fed7d7; }
+
+    /* Options grid */
+    .options-grid { display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-top:14px; }
+    @media(max-width:500px){ .options-grid{ grid-template-columns:1fr; } }
+
+    /* Cost bar */
+    .cost-bar { display:flex; align-items:center; justify-content:space-between; margin-top:14px; padding:12px 16px; background:var(--surface); border-radius:var(--radius); }
+    .cost-formula { font-size:.78rem; color:var(--text-mid); }
+    .cost-total { font-size:1.2rem; font-weight:700; color:var(--primary); }
+
+    /* Sent jobs */
+    .sent-job { display:flex; align-items:center; gap:10px; padding:10px 14px; background:var(--surface); border-radius:var(--radius); margin-bottom:6px; border-left:3px solid var(--accent); }
+    .sj-info { flex:1; min-width:0; }
+    .sj-name { font-size:.82rem; font-weight:600; color:var(--primary); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .sj-meta { font-size:.7rem; color:var(--text-light); margin-top:1px; }
+    .sj-status { font-size:.7rem; font-weight:700; padding:2px 8px; border-radius:10px; flex-shrink:0; }
+    .sj-pending    { background:#feebc8; color:#c05621; }
+    .sj-processing { background:#bee3f8; color:#2c5282; }
+    .sj-done       { background:#c6f6d5; color:#276749; border-left-color:var(--success); }
+    .sj-cancelled  { background:#fed7d7; color:#c53030; }
+
+    @media(max-width:480px){ .timer-display{font-size:2.8rem;} .info-grid{grid-template-columns:1fr 1fr;} }
+  </style>
+</head>
+<body>
+
+<div id="conn-banner" class="conn-banner offline">
+  <span class="dot dot-red"></span> Connecting to ICMS-ASI Server...
+</div>
+
+<header style="background:var(--grad-primary);padding:14px 24px;display:flex;align-items:center;justify-content:space-between">
+  <div style="display:flex;align-items:center;gap:10px">
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+    <span style="color:white;font-weight:700;font-size:1.1rem">Hive Internet Café</span>
+  </div>
+  <div style="display:flex;align-items:center;gap:12px">
+    <span class="pc-badge" id="pc-badge-header" style="font-size:.875rem;padding:5px 16px">—</span>
+    <a href="{{ url_for('logout') }}" style="color:rgba(255,255,255,.7);font-size:.8rem;text-decoration:none">Logout</a>
+  </div>
+</header>
+
+<div class="client-wrap">
+
+  <!-- ── Session Panel ── -->
+  <div class="card" style="text-align:center;padding:32px 24px">
+    <div style="margin-bottom:16px">
+      <span class="status-pill waiting" id="status-pill">
+        <span class="dot dot-orange"></span> Waiting for session to start...
+      </span>
+    </div>
+    <p class="text-xs text-muted" style="margin-bottom:4px">Session Timer</p>
+    <div class="timer-display" id="timer">00:00:00</div>
+    <div class="info-grid">
+      <div class="info-tile">
+        <div class="label">Session</div>
+        <div class="value" id="info-code" style="font-size:.8rem;letter-spacing:.03em">—</div>
+      </div>
+      <div class="info-tile">
+        <div class="label">Rate / Hour</div>
+        <div class="value" id="info-rate">₱20.00</div>
+      </div>
+      <div class="info-tile">
+        <div class="label">Current Bill</div>
+        <div class="value" id="info-bill" style="color:var(--success)">₱0.00</div>
+      </div>
+    </div>
+    <div id="end-session-wrap" style="display:none;margin-top:20px">
+      <button class="btn btn-danger" onclick="openEndConfirm()" style="justify-content:center;gap:8px">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="3" y="3" width="18" height="18" rx="2"/></svg>
+        Request End Session
+      </button>
+    </div>
+  </div>
+
+  <!-- ── Connection Status ── -->
+  <div class="card">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+      <h3 style="font-size:.95rem">Connection Status</h3>
+      <button class="btn btn-secondary btn-sm" onclick="doPing()">Ping Server</button>
+    </div>
+    <div style="display:flex;align-items:center;gap:12px;background:var(--surface);padding:12px 14px;border-radius:var(--radius)">
+      <span class="dot dot-red" id="conn-dot"></span>
+      <div>
+        <div style="font-weight:600;font-size:.875rem" id="conn-text">Connecting...</div>
+        <div class="text-xs text-muted">Server: {{ request.host_url }}</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Print Request ── -->
+  <div id="print-card" style="opacity:.45;pointer-events:none">
+    <div class="print-card-inner">
+
+      <!-- Header -->
+      <div class="print-card-header">
+        <div>
+          <h3>Print Request</h3>
+          <div style="margin-top:4px;font-size:.72rem;color:rgba(255,255,255,.75)">Upload a file to add to the print queue</div>
+        </div>
+        <div style="display:flex;gap:6px;align-items:center">
+          <span class="rate-pill">B&amp;W <span id="rate-bw-display">₱3</span>/p</span>
+          <span class="rate-pill">Color <span id="rate-color-display">₱5</span>/p</span>
+        </div>
+      </div>
+
+      <div class="print-card-body">
+
+        <!-- Drop Zone -->
+        <div class="drop-zone" id="drop-zone"
+             onclick="document.getElementById('print-file').click()"
+             ondragover="event.preventDefault();this.classList.add('drag-over')"
+             ondragleave="this.classList.remove('drag-over')"
+             ondrop="handleDrop(event)">
+          <input type="file" id="print-file" accept=".pdf,.docx,.jpg,.jpeg,.png" onchange="fileSelected(this)">
+          <svg class="dz-icon" width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="var(--secondary)" stroke-width="1.5">
+            <polyline points="16 16 12 12 8 16"/><line x1="12" y1="12" x2="12" y2="21"/>
+            <path d="M20.39 18.39A5 5 0 0 0 18 9h-1.26A8 8 0 1 0 3 16.3"/>
+          </svg>
+          <p style="font-weight:600;color:var(--primary);font-size:.9rem" id="dz-label">Click or drag a file here</p>
+          <p class="text-xs text-muted" style="margin-top:4px">PDF, DOCX, JPG, PNG — max 20MB</p>
+        </div>
+
+        <!-- Selected file info -->
+        <div id="selected-file-info" style="display:none;margin-top:10px">
+          <div class="selected-file-info">
+            <div class="sf-icon" id="sf-icon">PDF</div>
+            <div class="sf-name" id="sf-name">—</div>
+            <div class="sf-size" id="sf-size">—</div>
+            <button class="sf-remove" onclick="clearFile()" title="Remove file">✕</button>
+          </div>
+        </div>
+
+        <!-- Print Options -->
+        <div class="options-grid">
+          <div class="form-group" style="margin-bottom:0">
+            <label class="form-label text-xs">Color Mode</label>
+            <select class="form-control" id="opt-color" onchange="updateCost()">
+              <option value="BW">Black &amp; White</option>
+              <option value="Color">Color</option>
+            </select>
+          </div>
+          <div class="form-group" style="margin-bottom:0">
+            <label class="form-label text-xs">Paper Size</label>
+            <select class="form-control" id="opt-paper">
+              <option value="Short">Short (Letter)</option>
+              <option value="A4">A4</option>
+              <option value="Long">Long (Legal)</option>
+            </select>
+          </div>
+          <div class="form-group" style="margin-bottom:0">
+            <label class="form-label text-xs">Page Range</label>
+            <input class="form-control" type="text" id="opt-range" value="All" placeholder="All, 1-3, 5,7" oninput="updateCost()">
+          </div>
+          <div class="form-group" style="margin-bottom:0">
+            <label class="form-label text-xs">Copies</label>
+            <input class="form-control" type="number" id="opt-copies" value="1" min="1" max="99" oninput="updateCost()">
+          </div>
+        </div>
+
+        <!-- Note -->
+        <div class="form-group" style="margin-top:14px;margin-bottom:0">
+          <label class="form-label text-xs">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:middle;margin-right:3px"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+            Note to Admin (optional)
+          </label>
+          <textarea class="form-control" id="opt-note" rows="2"
+            placeholder="e.g. Print front side only, staple pages, etc."
+            style="resize:vertical;min-height:60px;font-size:.85rem"></textarea>
+        </div>
+
+        <!-- Cost bar -->
+        <div class="cost-bar">
+          <div>
+            <div class="cost-formula" id="cost-formula">Select a file to see cost</div>
+            <div class="cost-total" id="cost-total">₱0.00</div>
+          </div>
+          <button class="btn btn-primary" id="btn-send" onclick="submitPrint()" disabled style="justify-content:center;gap:8px">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>
+            Send to Print
+          </button>
+        </div>
+
+      </div><!-- /body -->
+    </div><!-- /inner -->
+
+    <!-- Sent Jobs -->
+    <div class="card" style="margin-top:12px" id="sent-jobs-card">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+        <h3 style="font-size:.9rem">My Print Jobs</h3>
+        <span class="badge badge-idle" id="jobs-count-badge">0 jobs</span>
+      </div>
+      <div id="my-print-jobs">
+        <p class="text-xs text-muted">No jobs sent yet.</p>
+      </div>
+    </div>
+
+  </div><!-- /print-card wrapper -->
+
+</div><!-- /client-wrap -->
+
+<!-- End Session Confirm Modal -->
+<div class="modal-overlay" id="end-confirm-modal">
+  <div class="modal-box" style="max-width:400px">
+    <div class="modal-header">
+      <h3>Request End Session?</h3>
+      <button class="modal-close" onclick="closeEndConfirm()">✕</button>
+    </div>
+    <div style="text-align:center;padding:16px 0 8px">
+      <svg width="52" height="52" viewBox="0 0 24 24" fill="none" stroke="var(--warning)" stroke-width="1.5" style="display:block;margin:0 auto 14px">
+        <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+        <line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
+      </svg>
+      <p style="font-weight:700;color:var(--primary);font-size:1rem">Are you sure?</p>
+      <p class="text-sm text-muted" style="margin-top:6px">Your current bill is <strong id="confirm-bill">₱0.00</strong></p>
+      <p class="text-sm text-muted" style="margin-top:4px">The admin will be notified to finalize and close your session.</p>
+    </div>
+    <div style="display:flex;gap:8px;margin-top:16px">
+      <button class="btn btn-secondary w-100" onclick="closeEndConfirm()" style="justify-content:center">Cancel</button>
+      <button class="btn btn-danger w-100"    onclick="confirmEndRequest()" style="justify-content:center">
+        Yes, End Session
+      </button>
+    </div>
+  </div>
+</div>
+
+<div class="toast-container"></div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.5/socket.io.min.js"></script>
+<script src="{{ url_for('static', filename='js/icms.js') }}"></script>
+<script>
+const RAW_NAME = "{{ user }}";
+// Use the server-assigned pc_label from login session (accurate)
+const pcLabel  = "{{ pc_label }}" || (RAW_NAME.toUpperCase().startsWith("PC-") ? RAW_NAME.toUpperCase() : "PC-" + RAW_NAME.substring(0,3).toUpperCase());
+document.getElementById("pc-badge-header").textContent = pcLabel;
+
+let sessionActive=false, sessionSeconds=0, sessionRate=20, sessionPrint=0, sessionId=null, billingInterval=null;
+let RATE_BW=3, RATE_COLOR=5;
+let selectedFile=null;
+let myPrintJobs=[];
+
+// ── Apply rates ────────────────────────────────────────────────────────────
+function applyRates(r) {
+  if (r.internet_rate)    { sessionRate=parseFloat(r.internet_rate);    document.getElementById("info-rate").textContent="₱"+sessionRate.toFixed(2); }
+  if (r.print_rate_bw)    { RATE_BW=parseFloat(r.print_rate_bw);        document.getElementById("rate-bw-display").textContent="₱"+RATE_BW; }
+  if (r.print_rate_color) { RATE_COLOR=parseFloat(r.print_rate_color);  document.getElementById("rate-color-display").textContent="₱"+RATE_COLOR; }
+  updateCost();
+}
+
+// ── Restore session on refresh ─────────────────────────────────────────────
+async function restoreSession() {
+  try {
+    const res = await fetch("/api/client/session");
+    const d   = await res.json();
+    applyRates(d);
+    if (d.active && d.session) {
+      const s = d.session;
+      sessionActive=true; sessionSeconds=s.elapsed_seconds||0;
+      sessionRate=s.rate_per_hour||20; sessionPrint=s.print_charge||0; sessionId=s.id;
+      document.getElementById("info-code").textContent=s.session_code||"—";
+      document.getElementById("info-rate").textContent="₱"+parseFloat(sessionRate).toFixed(2);
+      document.getElementById("info-bill").textContent=peso(s.total||0);
+      setSessionActive(true);
+      clearInterval(billingInterval);
+      billingInterval=setInterval(()=>{
+        sessionSeconds++;
+        const bill=(sessionSeconds/3600)*sessionRate+sessionPrint;
+        document.getElementById("timer").textContent=formatDuration(sessionSeconds);
+        document.getElementById("info-bill").textContent=peso(bill);
+      },1000);
+      showToast("Session restored — "+s.session_code,"info");
+    }
+  } catch(e){ console.warn("Restore failed:",e); }
+}
+
+function setSessionActive(active) {
+  document.getElementById("status-pill").className   = "status-pill "+(active?"active":"waiting");
+  document.getElementById("status-pill").innerHTML   = active
+    ? '<span class="dot dot-green"></span> Session Active'
+    : '<span class="dot dot-orange"></span> Waiting for session to start...';
+  document.getElementById("print-card").style.opacity      = active?"1":".45";
+  document.getElementById("print-card").style.pointerEvents= active?"auto":"none";
+  document.getElementById("end-session-wrap").style.display= active?"block":"none";
+}
+
+// ── SocketIO ───────────────────────────────────────────────────────────────
+const icms = new ICMSSocket("client", pcLabel).connect();
+
+icms.on("connect",()=>{ document.getElementById("conn-dot").className="dot dot-green"; document.getElementById("conn-text").textContent="Connected to Admin Server"; showToast("Connected","success"); });
+icms.on("disconnect",()=>{ document.getElementById("conn-dot").className="dot dot-red"; document.getElementById("conn-text").textContent="Disconnected — reconnecting..."; });
+icms.on("rates_updated",(d)=>{ applyRates(d); showToast("Rates updated — ₱"+d.internet_rate+"/hr","info"); });
+
+icms.on("session_started",(data)=>{
+  sessionActive=true; sessionSeconds=data.elapsed_seconds||0;
+  sessionRate=data.rate_per_hour||20; sessionPrint=data.print_charge||0; sessionId=data.id;
+  document.getElementById("info-code").textContent=data.session_code||"—";
+  document.getElementById("info-rate").textContent="₱"+parseFloat(sessionRate).toFixed(2);
+  setSessionActive(true);
+  clearInterval(billingInterval);
+  billingInterval=setInterval(()=>{
+    sessionSeconds++;
+    const bill=(sessionSeconds/3600)*sessionRate+sessionPrint;
+    document.getElementById("timer").textContent=formatDuration(sessionSeconds);
+    document.getElementById("info-bill").textContent=peso(bill);
+  },1000);
+  showToast("Session started! Welcome, "+data.customer_name,"success");
+});
+
+icms.on("session_ended",(data)=>{
+  sessionActive=false; clearInterval(billingInterval);
+  document.getElementById("status-pill").className="status-pill ended";
+  document.getElementById("status-pill").innerHTML='<span class="dot dot-red"></span> Session Ended';
+  document.getElementById("info-bill").textContent=peso(data.total||0);
+  document.getElementById("print-card").style.opacity=".45";
+  document.getElementById("print-card").style.pointerEvents="none";
+  document.getElementById("end-session-wrap").style.display="none";
+  closeEndConfirm();
+  showToast("Session ended. Total: "+peso(data.total||0)+" — Please pay at the cashier.","info",8000);
+});
+
+icms.on("billing_tick",(data)=>{
+  if(!sessionActive)return;
+  sessionSeconds=data.seconds; sessionPrint=data.print;
+  document.getElementById("timer").textContent=formatDuration(sessionSeconds);
+  document.getElementById("info-bill").textContent=peso(data.bill);
+});
+
+icms.on("print_confirmed",(data)=>{
+  const idx=myPrintJobs.findIndex(j=>j.id===data.id);
+  if(idx>=0) myPrintJobs[idx]=data; else myPrintJobs.unshift(data);
+  renderMyJobs();
+  showToast("Print received: "+data.filename+" — "+peso(data.charge),"success");
+});
+
+icms.on("print_status",(data)=>{
+  const idx=myPrintJobs.findIndex(j=>j.id===data.id);
+  if(idx>=0){ myPrintJobs[idx]=data; renderMyJobs(); }
+  if(data.status==="done")       showToast('"'+data.filename+'" is ready for pickup!','success',6000);
+  else if(data.status==="processing") showToast('"'+data.filename+'" is now printing...','info');
+  else if(data.status==="cancelled")  showToast('"'+data.filename+'" was cancelled.','warning');
+});
+
+// ── End Session ────────────────────────────────────────────────────────────
+function openEndConfirm(){
+  const bill=(sessionSeconds/3600)*sessionRate+sessionPrint;
+  document.getElementById("confirm-bill").textContent=peso(bill);
+  document.getElementById("end-confirm-modal").classList.add("active");
+}
+function closeEndConfirm(){ document.getElementById("end-confirm-modal").classList.remove("active"); }
+document.getElementById("end-confirm-modal").addEventListener("click",e=>{ if(e.target===document.getElementById("end-confirm-modal")) closeEndConfirm(); });
+
+async function confirmEndRequest(){
+  if(!sessionId){ closeEndConfirm(); return; }
+  try{
+    await fetch("/api/session/client-end-request",{
+      method:"POST", headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({session_id:sessionId, pc_label:pcLabel})
+    });
+    closeEndConfirm();
+    showToast("End session request sent to admin. Please wait.","info",6000);
+  }catch(e){ showToast("Could not send request","error"); }
+}
+
+// ── File selection ─────────────────────────────────────────────────────────
+function fileIcon(ext){
+  const icons={pdf:"sf-pdf",docx:"sf-docx",jpg:"sf-img",jpeg:"sf-img",png:"sf-img"};
+  const labels={pdf:"PDF",docx:"DOC",jpg:"IMG",jpeg:"IMG",png:"IMG"};
+  return {cls:icons[ext]||"sf-img",label:labels[ext]||"FILE"};
+}
+
+function fileSelected(input){
+  if(!input.files[0])return;
+  selectedFile=input.files[0];
+  const ext=selectedFile.name.split(".").pop().toLowerCase();
+  const {cls,label}=fileIcon(ext);
+  document.getElementById("sf-icon").className=`sf-icon ${cls}`;
+  document.getElementById("sf-icon").textContent=label;
+  document.getElementById("sf-name").textContent=selectedFile.name;
+  document.getElementById("sf-size").textContent=(selectedFile.size/1024).toFixed(0)+" KB";
+  document.getElementById("selected-file-info").style.display="flex";
+  document.getElementById("drop-zone").classList.add("has-file");
+  document.getElementById("dz-label").textContent="File selected";
+  document.getElementById("btn-send").disabled=false;
+  updateCost();
+}
+
+function handleDrop(e){
+  e.preventDefault();
+  document.getElementById("drop-zone").classList.remove("drag-over");
+  const file=e.dataTransfer.files[0];
+  if(file){
+    const dt=new DataTransfer(); dt.items.add(file);
+    const inp=document.getElementById("print-file"); inp.files=dt.files; fileSelected(inp);
+  }
+}
+
+function clearFile(){
+  selectedFile=null;
+  document.getElementById("print-file").value="";
+  document.getElementById("selected-file-info").style.display="none";
+  document.getElementById("drop-zone").classList.remove("has-file");
+  document.getElementById("dz-label").textContent="Click or drag a file here";
+  document.getElementById("btn-send").disabled=true;
+  updateCost();
+}
+
+function updateCost(){
+  if(!selectedFile){ document.getElementById("cost-formula").textContent="Select a file to see cost"; document.getElementById("cost-total").textContent="₱0.00"; return; }
+  const colorMode=document.getElementById("opt-color").value;
+  const copies=parseInt(document.getElementById("opt-copies").value)||1;
+  const rate=colorMode==="Color"?RATE_COLOR:RATE_BW;
+  // Client estimates 1 page (server counts exact)
+  const estCost=1*copies*rate;
+  document.getElementById("cost-formula").textContent="~1 page × "+copies+" cop"+(copies>1?"ies":"y")+" × ₱"+rate+" ("+colorMode+") — estimate";
+  document.getElementById("cost-total").textContent=peso(estCost);
+}
+
+async function submitPrint(){
+  if(!selectedFile)  { showToast("Please select a file","error"); return; }
+  if(!sessionActive) { showToast("No active session","error"); return; }
+
+  const btn=document.getElementById("btn-send");
+  btn.disabled=true; btn.textContent="Uploading...";
+
+  try{
+    const form=new FormData();
+    form.append("file",          selectedFile);
+    form.append("pc_label",      pcLabel);
+    form.append("customer_name", RAW_NAME);
+    form.append("session_id",    sessionId||"");
+    form.append("color_mode",    document.getElementById("opt-color").value);
+    form.append("paper_size",    document.getElementById("opt-paper").value);
+    form.append("page_range",    document.getElementById("opt-range").value||"All");
+    form.append("copies_count",  document.getElementById("opt-copies").value||1);
+    form.append("note",          document.getElementById("opt-note").value.trim());
+
+    const res=await fetch("/api/print/upload",{method:"POST",body:form});
+    const data=await res.json();
+    if(!res.ok||data.error){ showToast(data.error||"Upload failed","error"); return; }
+
+    myPrintJobs.unshift(data.job);
+    renderMyJobs();
+    showToast("File sent to print queue!","success");
+    // Reset form
+    clearFile();
+    document.getElementById("opt-copies").value="1";
+    document.getElementById("opt-range").value="All";
+    document.getElementById("opt-note").value="";
+    updateCost();
+  }catch(e){ showToast("Upload failed — check connection","error"); }
+  finally{
+    btn.disabled=false;
+    btn.innerHTML=`<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg> Send to Print`;
+  }
+}
+
+function renderMyJobs(){
+  const el=document.getElementById("my-print-jobs");
+  document.getElementById("jobs-count-badge").textContent=myPrintJobs.length+" job"+(myPrintJobs.length!==1?"s":"");
+  if(!myPrintJobs.length){ el.innerHTML=`<p class="text-xs text-muted">No jobs sent yet.</p>`; return; }
+  function icon(t){ const m={pdf:"sf-pdf sf-icon",docx:"sf-icon sf-docx",jpg:"sf-icon sf-img",jpeg:"sf-icon sf-img",png:"sf-icon sf-img"}; const l={pdf:"PDF",docx:"DOC",jpg:"IMG",jpeg:"IMG",png:"IMG"}; return `<div class="${m[t]||'sf-icon sf-img'}" style="width:28px;height:28px;font-size:.6rem">${l[t]||"FILE"}</div>`; }
+  el.innerHTML=myPrintJobs.slice(0,10).map(j=>`
+    <div class="sent-job" style="${j.status==='done'?'border-left-color:var(--success)':j.status==='cancelled'?'border-left-color:var(--danger)':j.status==='processing'?'border-left-color:var(--info)':''}">
+      ${icon(j.file_type)}
+      <div class="sj-info">
+        <div class="sj-name">${j.filename}</div>
+        <div class="sj-meta">${j.targeted_pages||j.pages||1}p × ${j.copies_count||1} · ${j.color_mode||'B&W'} · ${j.paper_size||'Short'} · ${peso(j.charge)}${j.note?` · <em>"${j.note}"</em>`:''}</div>
+      </div>
+      <span class="sj-status sj-${j.status}">${j.status.toUpperCase()}</span>
+    </div>`).join("");
+}
+
+async function doPing(){ const ok=await pingServer(); showToast(ok?"Server reachable — LAN OK":"Cannot reach server!",ok?"success":"error"); }
+
+restoreSession();
+
+// Re-sync billing when tab becomes visible (e.g. student alt-tabs back)
+// Uses server billing_tick data, not local timer, so drift is corrected
+icms.on("tab_visible", async () => {
+  if (!sessionActive) return;
+  try {
+    const res = await fetch("/api/client/session");
+    const d   = await res.json();
+    if (d.active && d.session) {
+      const s = d.session;
+      sessionSeconds = s.elapsed_seconds || sessionSeconds;
+      sessionPrint   = s.print_charge    || sessionPrint;
+      document.getElementById("timer").textContent    = formatDuration(sessionSeconds);
+      document.getElementById("info-bill").textContent = peso(s.total || 0);
+    }
+  } catch(e) { /* silent — billing_tick will catch up anyway */ }
+});
+</script>
+</body>
+</html>

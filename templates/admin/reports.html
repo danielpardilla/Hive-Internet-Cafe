@@ -1,0 +1,408 @@
+{% extends "admin/base.html" %}
+{% block title %}Reports — ICMS-ASI{% endblock %}
+
+{% block extra_css %}
+<style>
+  .r-tabs { display:flex; gap:4px; margin-bottom:20px; flex-wrap:wrap; }
+  .r-tab  { padding:8px 18px; border-radius:var(--radius); border:1.5px solid var(--accent);
+             background:var(--white); font-size:.875rem; font-weight:600; color:var(--text-mid);
+             cursor:pointer; transition:all .18s; }
+  .r-tab.active { background:var(--primary); color:var(--white); border-color:var(--primary); }
+  .r-panel { display:none; } .r-panel.active { display:block; }
+
+  .kpi-grid { display:grid; grid-template-columns:repeat(4,1fr); gap:14px; margin-bottom:24px; }
+  @media(max-width:1100px){ .kpi-grid{ grid-template-columns:repeat(2,1fr); } }
+  @media(max-width:600px) { .kpi-grid{ grid-template-columns:1fr; } }
+
+  .kpi-card { background:var(--white); border-radius:var(--radius-lg); padding:18px 20px; box-shadow:var(--shadow); transition:all .2s; }
+  .kpi-card:hover { box-shadow:var(--shadow-md); transform:translateY(-2px); }
+  .kpi-card .k-label { font-size:.72rem; color:var(--text-light); text-transform:uppercase; letter-spacing:.06em; margin-bottom:4px; }
+  .kpi-card .k-value { font-size:1.8rem; font-weight:700; color:var(--primary); }
+  .kpi-card .k-sub   { font-size:.75rem; color:var(--text-light); margin-top:3px; }
+  .kpi-card.accent   { background:var(--grad-primary); }
+  .kpi-card.accent .k-label,.kpi-card.accent .k-sub { color:rgba(255,255,255,.7); }
+  .kpi-card.accent .k-value { color:#fff; }
+
+  .chart-box    { position:relative; height:260px; width:100%; }
+  .chart-box-sm { position:relative; height:200px; width:100%; }
+
+  .heatmap-grid {
+    display:grid; grid-template-columns:repeat(24,1fr); gap:3px; margin-top:8px;
+  }
+  .heatmap-cell {
+    aspect-ratio:1; border-radius:3px; background:var(--surface);
+    position:relative; cursor:default; transition:transform .15s;
+  }
+  .heatmap-cell:hover { transform:scale(1.3); z-index:10; }
+  .heatmap-cell:hover::after {
+    content: attr(data-tip);
+    position:absolute; bottom:120%; left:50%; transform:translateX(-50%);
+    background:#1a202c; color:#fff; padding:3px 7px; border-radius:5px;
+    font-size:.65rem; white-space:nowrap; pointer-events:none; z-index:20;
+  }
+
+  .pc-bar-row { display:flex; align-items:center; gap:10px; margin-bottom:8px; }
+  .pc-bar-label { width:52px; font-size:.78rem; font-weight:600; color:var(--primary); flex-shrink:0; }
+  .pc-bar-track { flex:1; background:var(--surface); border-radius:4px; height:16px; overflow:hidden; }
+  .pc-bar-fill  { height:100%; background:var(--grad-primary); border-radius:4px; transition:width .6s ease; }
+  .pc-bar-val   { width:68px; font-size:.75rem; color:var(--text-mid); text-align:right; flex-shrink:0; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="page-header" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px">
+  <div>
+    <h1>Reports & Analytics</h1>
+    <p>Revenue trends, utilization, peak hours, and customer insights</p>
+  </div>
+  <button class="btn btn-secondary btn-sm" onclick="loadAll()">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+    Refresh
+  </button>
+</div>
+
+<!-- KPI Strip -->
+<div class="kpi-grid" id="kpi-strip">
+  <div class="kpi-card"><div class="k-label">Today Revenue</div><div class="k-value" id="k-today">₱0.00</div><div class="k-sub" id="k-today-sub">0 sessions</div></div>
+  <div class="kpi-card"><div class="k-label">This Week</div><div class="k-value" id="k-week">₱0.00</div><div class="k-sub" id="k-week-sub">0 sessions</div></div>
+  <div class="kpi-card accent"><div class="k-label">This Month</div><div class="k-value" id="k-month">₱0.00</div><div class="k-sub" id="k-month-sub">0 sessions</div></div>
+  <div class="kpi-card"><div class="k-label">Avg Session</div><div class="k-value" id="k-avg">0 min</div><div class="k-sub">Top PC: <strong id="k-toppc">—</strong></div></div>
+</div>
+
+<!-- Tabs -->
+<div class="r-tabs">
+  <button class="r-tab active" onclick="switchTab('trend')">Revenue Trend</button>
+  <button class="r-tab"        onclick="switchTab('peak')">Peak Hours</button>
+  <button class="r-tab"        onclick="switchTab('pcs')">PC Utilization</button>
+  <button class="r-tab"        onclick="switchTab('log')">Session Log</button>
+</div>
+
+<!-- ── Revenue Trend ── -->
+<div class="r-panel active" id="tab-trend">
+  <div class="card">
+    <div class="card-header flex items-center gap-1" style="justify-content:space-between">
+      <span class="card-title">30-Day Revenue Trend</span>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-secondary btn-sm" onclick="setTrendMode('bar')" id="btn-bar">Bar</button>
+        <button class="btn btn-primary  btn-sm" onclick="setTrendMode('line')" id="btn-line">Line</button>
+      </div>
+    </div>
+    <div class="chart-box"><canvas id="trendChart"></canvas></div>
+  </div>
+  <div class="grid-2 mt-2">
+    <div class="card">
+      <div class="card-header"><span class="card-title">Daily Breakdown (Last 7 Days)</span></div>
+      <div class="table-wrapper">
+        <table>
+          <thead><tr><th>Date</th><th>Sessions</th><th>Internet</th><th>Printing</th><th>Total</th></tr></thead>
+          <tbody id="trend-table-body"></tbody>
+        </table>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-header"><span class="card-title">Revenue Breakdown</span></div>
+      <div class="chart-box-sm"><canvas id="breakdownChart"></canvas></div>
+    </div>
+  </div>
+</div>
+
+<!-- ── Peak Hours ── -->
+<div class="r-panel" id="tab-peak">
+  <div class="card">
+    <div class="card-header"><span class="card-title">Sessions by Hour of Day</span></div>
+    <p class="text-sm mb-3">Darker = more sessions started at that hour</p>
+    <div class="heatmap-grid" id="heatmap-grid"></div>
+    <div style="display:flex;gap:4px;align-items:center;margin-top:10px;font-size:.72rem;color:var(--text-light)">
+      <span>Fewer</span>
+      <div style="display:flex;gap:2px">
+        <div style="width:14px;height:14px;border-radius:2px;background:var(--surface)"></div>
+        <div style="width:14px;height:14px;border-radius:2px;background:#b2cbde"></div>
+        <div style="width:14px;height:14px;border-radius:2px;background:#98bad5"></div>
+        <div style="width:14px;height:14px;border-radius:2px;background:#304674"></div>
+      </div>
+      <span>More</span>
+    </div>
+    <div class="chart-box mt-3"><canvas id="peakChart"></canvas></div>
+  </div>
+</div>
+
+<!-- ── PC Utilization ── -->
+<div class="r-panel" id="tab-pcs">
+  <div class="grid-2">
+    <div class="card">
+      <div class="card-header"><span class="card-title">Sessions per PC</span></div>
+      <div id="pc-sessions-bars"></div>
+    </div>
+    <div class="card">
+      <div class="card-header"><span class="card-title">Revenue per PC</span></div>
+      <div id="pc-revenue-bars"></div>
+    </div>
+  </div>
+  <div class="card mt-2">
+    <div class="card-header"><span class="card-title">PC Utilization Detail</span></div>
+    <div class="table-wrapper">
+      <table>
+        <thead><tr><th>PC</th><th>Status</th><th>Total Sessions</th><th>Total Time</th><th>Revenue</th><th>Avg Session</th></tr></thead>
+        <tbody id="pc-table-body"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- ── Session Log ── -->
+<div class="r-panel" id="tab-log">
+  <div class="card">
+    <div class="card-header" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px">
+      <span class="card-title">Session Log</span>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <select class="form-control" id="log-status-filter" onchange="loadSessionLog()" style="padding:6px 10px;font-size:.82rem">
+          <option value="all">All Status</option>
+          <option value="active">Active</option>
+          <option value="ended">Ended (unpaid)</option>
+          <option value="paid">Paid</option>
+        </select>
+        <input type="text" class="form-control" id="log-search" placeholder="Search customer / PC..."
+               oninput="filterLog()" style="padding:6px 10px;font-size:.82rem;max-width:200px">
+      </div>
+    </div>
+    <div class="table-wrapper">
+      <table>
+        <thead><tr><th>Code</th><th>Customer</th><th>PC</th><th>Started</th><th>Ended</th><th>Duration</th><th>Internet</th><th>Print</th><th>Total</th><th>Status</th></tr></thead>
+        <tbody id="log-table-body"><tr><td colspan="10" class="text-center text-muted" style="padding:28px">Loading...</td></tr></tbody>
+      </table>
+    </div>
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-top:12px;font-size:.82rem;color:var(--text-light)">
+      <span id="log-count">—</span>
+      <div style="display:flex;gap:6px">
+        <button class="btn btn-secondary btn-sm" id="log-prev" onclick="logPage(-1)">← Prev</button>
+        <span id="log-page-info" style="padding:6px 10px;font-size:.8rem">Page 1</span>
+        <button class="btn btn-secondary btn-sm" id="log-next" onclick="logPage(1)">Next →</button>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<script>
+let trendChart=null, breakdownChart=null, peakChart=null;
+let trendMode="line", trendData=[], logData=[], logOffset=0, logLimit=50;
+
+// ── Tab ────────────────────────────────────────────────────────────────────
+function switchTab(tab) {
+  const tabs = ["trend","peak","pcs","log"];
+  document.querySelectorAll(".r-tab").forEach((b,i) => b.classList.toggle("active", tabs[i]===tab));
+  document.querySelectorAll(".r-panel").forEach(p => p.classList.remove("active"));
+  document.getElementById("tab-"+tab).classList.add("active");
+  if (tab==="trend")     loadTrend();
+  if (tab==="peak")      loadPeak();
+  if (tab==="pcs")       loadPCUtil();
+  if (tab==="log")       { logOffset=0; loadSessionLog(); }
+}
+
+// ── KPIs ───────────────────────────────────────────────────────────────────
+async function loadKPIs() {
+  const res = await fetch("/api/reports/overview");
+  const d   = await res.json();
+  document.getElementById("k-today").textContent    = peso(d.today_revenue);
+  document.getElementById("k-today-sub").textContent= d.today_sessions+" session"+(d.today_sessions!==1?"s":"");
+  document.getElementById("k-week").textContent     = peso(d.week_revenue);
+  document.getElementById("k-week-sub").textContent = d.week_sessions+" session"+(d.week_sessions!==1?"s":"");
+  document.getElementById("k-month").textContent    = peso(d.month_revenue);
+  document.getElementById("k-month-sub").textContent= d.month_sessions+" session"+(d.month_sessions!==1?"s":"");
+  document.getElementById("k-avg").textContent      = d.avg_duration_min+" min";
+  document.getElementById("k-toppc").textContent    = d.top_pc;
+}
+
+// ── Trend ──────────────────────────────────────────────────────────────────
+async function loadTrend() {
+  const res = await fetch("/api/reports/revenue-trend");
+  trendData = await res.json();
+  renderTrendChart();
+  renderTrendTable();
+  renderBreakdownChart();
+}
+
+function setTrendMode(mode) {
+  trendMode = mode;
+  document.getElementById("btn-bar").className  = mode==="bar"  ? "btn btn-primary btn-sm" : "btn btn-secondary btn-sm";
+  document.getElementById("btn-line").className = mode==="line" ? "btn btn-primary btn-sm" : "btn btn-secondary btn-sm";
+  renderTrendChart();
+}
+
+function renderTrendChart() {
+  if (!trendData.length) return;
+  const labels   = trendData.map(d => d.date);
+  const internet = trendData.map(d => d.internet);
+  const printing = trendData.map(d => d.printing);
+  const ctx      = document.getElementById("trendChart").getContext("2d");
+  if (trendChart) { trendChart.destroy(); trendChart=null; }
+  trendChart = new Chart(ctx, {
+    type: trendMode,
+    data: { labels, datasets: [
+      { label:"Internet (₱)", data:internet, backgroundColor:trendMode==="bar"?"#304674":"rgba(48,70,116,.1)",
+        borderColor:"#304674", borderWidth:2.5, pointRadius:trendMode==="bar"?0:4, fill:trendMode==="line", tension:.4, borderRadius:trendMode==="bar"?4:0 },
+      { label:"Printing (₱)", data:printing, backgroundColor:trendMode==="bar"?"#98bad5":"rgba(152,186,213,.15)",
+        borderColor:"#98bad5", borderWidth:2.5, pointRadius:trendMode==="bar"?0:4, fill:trendMode==="line", tension:.4, borderRadius:trendMode==="bar"?4:0 }
+    ]},
+    options: { responsive:true, maintainAspectRatio:false,
+      plugins:{ legend:{position:"bottom",labels:{color:"#304674",font:{weight:"600"}}},
+                tooltip:{callbacks:{label:ctx=>"₱"+ctx.raw.toFixed(2)}} },
+      scales:{ x:{grid:{color:"#c6d3e3"},ticks:{maxTicksLimit:10}},
+               y:{grid:{color:"#c6d3e3"},ticks:{callback:v=>"₱"+v},beginAtZero:true} }
+    }
+  });
+}
+
+function renderTrendTable() {
+  const last7 = trendData.slice(-7).reverse();
+  document.getElementById("trend-table-body").innerHTML = last7.map(d=>`
+    <tr>
+      <td class="text-muted">${d.date}</td>
+      <td>${d.sessions}</td>
+      <td>${peso(d.internet)}</td>
+      <td>${peso(d.printing)}</td>
+      <td class="fw-bold" style="color:var(--primary)">${peso(d.total)}</td>
+    </tr>`).join("");
+}
+
+function renderBreakdownChart() {
+  const totalInet = trendData.reduce((a,d)=>a+d.internet,0);
+  const totalPrt  = trendData.reduce((a,d)=>a+d.printing,0);
+  const ctx = document.getElementById("breakdownChart").getContext("2d");
+  if (breakdownChart) { breakdownChart.destroy(); breakdownChart=null; }
+  breakdownChart = new Chart(ctx, {
+    type:"doughnut",
+    data:{ labels:["Internet","Printing"],
+           datasets:[{data:[totalInet,totalPrt],backgroundColor:["#304674","#98bad5"],borderWidth:3,borderColor:"#fff"}] },
+    options:{ responsive:true, maintainAspectRatio:false, cutout:"60%",
+      plugins:{ legend:{position:"bottom",labels:{color:"#304674",font:{weight:"600"}}},
+                tooltip:{callbacks:{label:ctx=>" "+ctx.label+": "+peso(ctx.raw)}} } }
+  });
+}
+
+// ── Peak Hours ─────────────────────────────────────────────────────────────
+async function loadPeak() {
+  const res  = await fetch("/api/reports/peak-hours");
+  const data = await res.json();
+  const maxC = Math.max(...data.map(d=>d.count), 1);
+
+  // Heatmap
+  document.getElementById("heatmap-grid").innerHTML = data.map(d => {
+    const intensity = d.count / maxC;
+    const color = intensity === 0 ? "var(--surface)"
+                : intensity < .33 ? "#b2cbde"
+                : intensity < .66 ? "#98bad5" : "#304674";
+    return `<div class="heatmap-cell" style="background:${color}" data-tip="${d.label}: ${d.count} sessions"></div>`;
+  }).join("");
+
+  // Bar chart
+  const ctx = document.getElementById("peakChart").getContext("2d");
+  if (peakChart) { peakChart.destroy(); peakChart=null; }
+  peakChart = new Chart(ctx, {
+    type:"bar",
+    data:{ labels:data.map(d=>d.label),
+           datasets:[{label:"Sessions",data:data.map(d=>d.count),
+             backgroundColor:data.map(d=>d.count/maxC>0.66?"#304674":d.count/maxC>0.33?"#98bad5":"#b2cbde"),
+             borderRadius:4}] },
+    options:{ responsive:true, maintainAspectRatio:false,
+      plugins:{ legend:{display:false} },
+      scales:{ x:{grid:{display:false},ticks:{maxRotation:0}},
+               y:{grid:{color:"#c6d3e3"},ticks:{stepSize:1},beginAtZero:true} } }
+  });
+}
+
+// ── PC Utilization ─────────────────────────────────────────────────────────
+async function loadPCUtil() {
+  const res  = await fetch("/api/reports/pc-utilization");
+  const data = await res.json();
+  const maxSess = Math.max(...data.map(d=>d.sessions),1);
+  const maxRev  = Math.max(...data.map(d=>d.revenue), 1);
+
+  document.getElementById("pc-sessions-bars").innerHTML =
+    data.filter(d=>d.sessions>0).map(d=>`
+      <div class="pc-bar-row">
+        <span class="pc-bar-label">${d.label}</span>
+        <div class="pc-bar-track"><div class="pc-bar-fill" style="width:${(d.sessions/maxSess*100).toFixed(1)}%"></div></div>
+        <span class="pc-bar-val">${d.sessions} sessions</span>
+      </div>`).join("") || `<p class="text-muted text-sm">No sessions recorded yet</p>`;
+
+  document.getElementById("pc-revenue-bars").innerHTML =
+    data.filter(d=>d.revenue>0).map(d=>`
+      <div class="pc-bar-row">
+        <span class="pc-bar-label">${d.label}</span>
+        <div class="pc-bar-track"><div class="pc-bar-fill" style="width:${(d.revenue/maxRev*100).toFixed(1)}%"></div></div>
+        <span class="pc-bar-val">${peso(d.revenue)}</span>
+      </div>`).join("") || `<p class="text-muted text-sm">No revenue recorded yet</p>`;
+
+  document.getElementById("pc-table-body").innerHTML = data.map(d=>`
+    <tr>
+      <td><span style="background:var(--primary);color:#fff;padding:2px 8px;border-radius:6px;font-size:.78rem;font-weight:600">${d.label}</span></td>
+      <td><span class="dot ${d.connected?"dot-green":"dot-red"}" style="margin-right:4px"></span>${d.connected?"Online":"Offline"}</td>
+      <td class="text-center">${d.sessions}</td>
+      <td>${Math.floor(d.minutes/60)}h ${d.minutes%60}m</td>
+      <td class="fw-bold" style="color:var(--primary)">${peso(d.revenue)}</td>
+      <td class="text-muted">${d.sessions?Math.round(d.minutes/d.sessions)+" min":"—"}</td>
+    </tr>`).join("");
+}
+
+// ── Session Log ────────────────────────────────────────────────────────────
+async function loadSessionLog() {
+  const status = document.getElementById("log-status-filter").value;
+  const res    = await fetch(`/api/reports/session-log?status=${status}&limit=${logLimit}&offset=${logOffset}`);
+  const d      = await res.json();
+  logData = d.sessions;
+  document.getElementById("log-count").textContent = `Showing ${logOffset+1}–${Math.min(logOffset+logData.length,d.total)} of ${d.total} sessions`;
+  document.getElementById("log-page-info").textContent = `Page ${Math.floor(logOffset/logLimit)+1}`;
+  document.getElementById("log-prev").disabled = logOffset === 0;
+  document.getElementById("log-next").disabled = logOffset + logLimit >= d.total;
+  renderLog(logData);
+}
+
+function logPage(dir) {
+  logOffset = Math.max(0, logOffset + dir * logLimit);
+  loadSessionLog();
+}
+
+function renderLog(data) {
+  const search = (document.getElementById("log-search").value||"").toLowerCase();
+  const rows   = search ? data.filter(s=>s.customer_name.toLowerCase().includes(search)||s.pc_label.toLowerCase().includes(search)||s.session_code.toLowerCase().includes(search)) : data;
+  const tbody  = document.getElementById("log-table-body");
+  if (!rows.length) { tbody.innerHTML=`<tr><td colspan="10" class="text-center text-muted" style="padding:28px">No sessions found</td></tr>`; return; }
+  tbody.innerHTML = rows.map(s=>`
+    <tr>
+      <td><code style="font-size:.75rem">${s.session_code}</code></td>
+      <td><strong>${s.customer_name}</strong></td>
+      <td><span style="background:var(--primary);color:#fff;padding:2px 8px;border-radius:6px;font-size:.75rem;font-weight:600">${s.pc_label}</span></td>
+      <td class="text-muted text-sm">${s.started_at||"—"}</td>
+      <td class="text-muted text-sm">${s.ended_at||"Active"}</td>
+      <td style="font-family:monospace">${fmtSec(s.elapsed_seconds)}</td>
+      <td>${peso(s.internet_charge)}</td>
+      <td>${peso(s.print_charge)}</td>
+      <td class="fw-bold" style="color:var(--primary)">${peso(s.total)}</td>
+      <td><span class="badge badge-${s.status==="active"?"active":s.status==="paid"?"completed":"pending"}">${s.status.toUpperCase()}</span></td>
+    </tr>`).join("");
+}
+
+function filterLog() { renderLog(logData); }
+
+// ── Helpers ────────────────────────────────────────────────────────────────
+function fmtSec(s){ s=parseInt(s||0); return String(Math.floor(s/3600)).padStart(2,"0")+":"+String(Math.floor((s%3600)/60)).padStart(2,"0")+":"+String(s%60).padStart(2,"0"); }
+function peso(v)  { return "₱"+parseFloat(v||0).toFixed(2); }
+
+async function loadAll() {
+  await loadKPIs();
+  const activeTab = document.querySelector(".r-tab.active")?.textContent.toLowerCase();
+  if (activeTab?.includes("trend"))    loadTrend();
+  if (activeTab?.includes("peak"))     loadPeak();
+  if (activeTab?.includes("pc"))       loadPCUtil();
+  if (activeTab?.includes("session"))  loadSessionLog();
+}
+
+// ── Init ───────────────────────────────────────────────────────────────────
+window.addEventListener("load", () => { loadKPIs(); loadTrend(); });
+icms.on("connect", () => loadAll());
+icms.on("pc_update", () => loadKPIs());
+</script>
+{% endblock %}

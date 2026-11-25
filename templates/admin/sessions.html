@@ -1,0 +1,508 @@
+{% extends "admin/base.html" %}
+{% block title %}Session Management — Hive Internet Cafe{% endblock %}
+
+{% block extra_css %}
+<style>
+  .pc-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+    gap: 14px;
+  }
+  .pc-card {
+    background: var(--white);
+    border-radius: var(--radius-lg);
+    padding: 18px;
+    box-shadow: var(--shadow);
+    border: 2px solid transparent;
+    transition: all .2s;
+    cursor: pointer;
+    position: relative;
+  }
+  .pc-card:hover { box-shadow: var(--shadow-md); transform: translateY(-2px); }
+  .pc-card.available  { border-color: #c6f6d5; }
+  .pc-card.occupied   { border-color: #304674; background: linear-gradient(135deg,#f0f4f8,#e8eef5); }
+  .pc-card.reserved   { border-color: #e9d8fd; }
+  .pc-card.offline    { border-color: #e2e8f0; opacity: .6; }
+  .pc-card.maintenance{ border-color: #fed7d7; }
+
+  .pc-label-badge {
+    font-size: .9rem; font-weight: 700; color: var(--primary);
+    background: var(--surface); padding: 4px 12px;
+    border-radius: 20px; display: inline-block; margin-bottom: 10px;
+  }
+  .pc-status-row { display: flex; align-items: center; gap: 6px; margin-bottom: 8px; }
+  .pc-customer   { font-size: .8rem; font-weight: 600; color: var(--primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .pc-timer      { font-size: 1.25rem; font-weight: 700; color: var(--primary); font-family: 'Courier New', monospace; }
+  .pc-bill       { font-size: .85rem; font-weight: 600; color: var(--success); }
+  .pc-actions    { display: flex; gap: 6px; margin-top: 12px; flex-wrap: wrap; }
+  .pc-actions .btn { flex: 1; justify-content: center; font-size: .75rem; padding: 6px 8px; }
+
+  .conn-dot {
+    width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0;
+  }
+  .conn-dot.on  { background: var(--success); box-shadow: 0 0 0 3px rgba(56,161,105,.2); }
+  .conn-dot.off { background: #cbd5e0; }
+
+  /* Start Session Modal */
+  .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,.45); z-index: 1000; display: none; align-items: center; justify-content: center; }
+  .modal-overlay.active { display: flex; }
+  .modal-box { background: var(--white); border-radius: var(--radius-lg); padding: 32px; width: 100%; max-width: 440px; box-shadow: var(--shadow-lg); animation: fadeUp .22s ease; }
+  .modal-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
+  .modal-close  { background: none; border: none; cursor: pointer; color: var(--text-light); font-size: 1.4rem; line-height: 1; }
+  @keyframes fadeUp { from { transform: translateY(16px); opacity:0 } to { transform: translateY(0); opacity:1 } }
+
+  /* End Session confirm */
+  #end-modal .confirm-bill { font-size: 2rem; font-weight: 700; color: var(--primary); text-align: center; padding: 16px 0; }
+
+  .section-tabs { display: flex; gap: 4px; margin-bottom: 20px; }
+  .tab-btn { padding: 8px 20px; border-radius: var(--radius); border: 1.5px solid var(--accent); background: var(--white); font-size: .875rem; font-weight: 600; color: var(--text-mid); cursor: pointer; transition: all .18s; }
+  .tab-btn.active { background: var(--primary); color: var(--white); border-color: var(--primary); }
+
+  .active-table-wrap { display: none; }
+  .active-table-wrap.visible { display: block; }
+</style>
+{% endblock %}
+
+{% block content %}
+<!-- End Session Request Notification Panel -->
+<div id="sm-end-requests" style="display:none;background:#b91c1c;color:#fff;border-radius:var(--radius-lg);padding:14px 20px;margin-bottom:16px;box-shadow:0 4px 16px rgba(185,28,28,.35);">
+  <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="flex-shrink:0;animation:pulse 1s infinite">
+      <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+      <line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
+    </svg>
+    <div style="flex:1">
+      <div style="font-weight:800;font-size:1rem" id="sm-end-req-title">Customer requesting to end session</div>
+      <div id="sm-end-req-list" style="margin-top:6px;display:flex;flex-wrap:wrap;gap:6px"></div>
+    </div>
+    <button onclick="dismissAllEndRequests()" style="background:rgba(255,255,255,.2);border:1.5px solid rgba(255,255,255,.5);color:#fff;border-radius:var(--radius);padding:6px 14px;cursor:pointer;font-weight:600;font-size:.82rem">
+      Dismiss All
+    </button>
+  </div>
+</div>
+<style>
+@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.5} }
+</style>
+
+<div class="page-header" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px">
+  <div>
+    <h1>Session Management</h1>
+    <p>Current rate: <strong id="sm-rate-display">₱20.00/hr</strong> &nbsp;·&nbsp; B&W: <strong id="sm-bw-display">₱3.00/p</strong> &nbsp;·&nbsp; Color: <strong id="sm-color-display">₱5.00/p</strong></p>
+  </div>
+  <div style="display:flex;gap:8px;align-items:center">
+    <span class="badge badge-active" id="badge-active">0 Active</span>
+    <span class="badge badge-idle"   id="badge-available">0 Available</span>
+    <button class="btn btn-secondary btn-sm" onclick="loadGrid()">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+      Refresh
+    </button>
+  </div>
+</div>
+
+<!-- Tabs -->
+<div class="section-tabs">
+  <button class="tab-btn active" onclick="switchTab('grid')">PC Grid</button>
+  <button class="tab-btn"        onclick="switchTab('table')">Active Sessions Table</button>
+</div>
+
+<!-- PC Grid -->
+<div id="tab-grid" class="pc-grid mb-3" style="min-height:200px">
+  <div style="grid-column:1/-1;text-align:center;padding:40px;color:var(--text-light)">
+    <span class="spinner" style="margin:0 auto"></span>
+    <p style="margin-top:12px">Loading PCs...</p>
+  </div>
+</div>
+
+<!-- Active Sessions Table -->
+<div id="tab-table" class="active-table-wrap card">
+  <div class="card-header"><span class="card-title">Active Sessions</span></div>
+  <div class="table-wrapper">
+    <table>
+      <thead><tr><th>Session Code</th><th>Customer</th><th>PC</th><th>Started</th><th>Elapsed</th><th>Bill</th><th>Actions</th></tr></thead>
+      <tbody id="sessions-tbody">
+        <tr><td colspan="7" class="text-center text-muted" style="padding:28px">No active sessions</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- ── Start Session Modal ── -->
+<div class="modal-overlay" id="start-modal">
+  <div class="modal-box">
+    <div class="modal-header">
+      <h3 id="start-modal-title">Start Session</h3>
+      <button class="modal-close" onclick="closeModal('start-modal')">✕</button>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Customer Name</label>
+      <input class="form-control" id="start-customer" type="text" placeholder="Enter customer name" autofocus>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Rate per Hour</label>
+      <div style="display:flex;align-items:center;gap:8px">
+        <span style="font-weight:700;color:var(--primary)">₱</span>
+        <input class="form-control" id="start-rate" type="number" value="20" min="1" step="1">
+      </div>
+    </div>
+    <div style="display:flex;gap:8px;margin-top:8px">
+      <button class="btn btn-secondary w-100" onclick="closeModal('start-modal')" style="justify-content:center">Cancel</button>
+      <button class="btn btn-primary   w-100" onclick="confirmStart()"            style="justify-content:center">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+        Start Session
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- ── End Session Modal ── -->
+<div class="modal-overlay" id="end-modal">
+  <div class="modal-box">
+    <div class="modal-header">
+      <h3>End Session</h3>
+      <button class="modal-close" onclick="closeModal('end-modal')">✕</button>
+    </div>
+    <div style="text-align:center;margin-bottom:16px">
+      <p class="text-muted text-sm">Final bill for <strong id="end-customer">—</strong> on <strong id="end-pc">—</strong></p>
+      <div class="confirm-bill" id="end-bill">₱0.00</div>
+      <p class="text-xs text-muted">Internet: <span id="end-internet">₱0.00</span> + Print: <span id="end-print">₱0.00</span></p>
+    </div>
+    <div class="receipt" id="end-receipt" style="margin:0 auto 16px;font-size:.8rem">
+      <div class="receipt-header">Hive Internet Café</div>
+      <hr class="receipt-divider">
+      <div style="display:flex;justify-content:space-between"><span>Session:</span><span id="r-code">—</span></div>
+      <div style="display:flex;justify-content:space-between"><span>Customer:</span><span id="r-customer">—</span></div>
+      <div style="display:flex;justify-content:space-between"><span>PC:</span><span id="r-pc">—</span></div>
+      <div style="display:flex;justify-content:space-between"><span>Duration:</span><span id="r-duration">—</span></div>
+      <div style="display:flex;justify-content:space-between"><span>Internet:</span><span id="r-internet">—</span></div>
+      <div style="display:flex;justify-content:space-between"><span>Printing:</span><span id="r-print">—</span></div>
+      <hr class="receipt-divider">
+      <div style="display:flex;justify-content:space-between" class="receipt-total"><span>TOTAL:</span><span id="r-total">—</span></div>
+    </div>
+    <div style="display:flex;gap:8px">
+      <button class="btn btn-secondary w-100" onclick="closeModal('end-modal')"  style="justify-content:center">Cancel</button>
+      <button class="btn btn-danger   w-100" onclick="confirmEnd()"              style="justify-content:center">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/></svg>
+        End &amp; Bill
+      </button>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+// ── State ──
+let pcGrid   = [];
+let selected = null;   // { pc, action: "start"|"end" }
+let timers   = {};     // pc_label → intervalId
+
+// ── Tab switch ──
+function switchTab(tab) {
+  document.querySelectorAll(".tab-btn").forEach((b,i) => {
+    b.classList.toggle("active", ["grid","table"][i] === tab);
+  });
+  document.getElementById("tab-grid").style.display      = tab === "grid"     ? "grid"  : "none";
+  document.getElementById("tab-table").style.display     = tab === "table"    ? "block" : "none";
+}
+
+// ── Load PC Grid ──
+async function loadGrid() {
+  try {
+    const res  = await fetch("/api/pcs");
+    const data = await res.json();
+    pcGrid = data;
+    renderGrid(data);
+    renderTable(data);
+    updateBadges(data);
+  } catch(e) {
+    showToast("Failed to load PC grid", "error");
+  }
+}
+
+function renderGrid(pcs) {
+  const container = document.getElementById("tab-grid");
+  if (!pcs.length) { container.innerHTML = `<p class="text-muted">No PCs found.</p>`; return; }
+
+  container.innerHTML = pcs.map(pc => {
+    const s       = pc.session;
+    const offline = !pc.connected;
+    const cls     = offline ? "offline" : pc.status;
+
+    let body = "";
+    if (pc.status === "occupied" && s) {
+      body = `
+        <div class="pc-customer">${s.customer_name}</div>
+        <div class="pc-timer" id="timer-${pc.label}">${fmt(s.elapsed_seconds)}</div>
+        <div class="pc-bill"  id="bill-${pc.label}">₱${s.total.toFixed(2)}</div>
+        <div class="pc-actions">
+          <button class="btn btn-danger"   onclick="event.stopPropagation();openEndModal(${JSON.stringify(pc).replace(/"/g,'&quot;')})">End</button>
+        </div>`;
+    } else {
+      body = `<div class="text-muted text-sm" style="margin-top:4px">${offline ? "Not connected" : pc.status === "available" ? "Ready" : pc.status}</div>
+              ${!offline && pc.status === "available" ? `<div class="pc-actions"><button class="btn btn-primary" onclick="event.stopPropagation();openStartModal(${JSON.stringify(pc).replace(/"/g,'&quot;')})">Start Session</button></div>` : ""}`;
+    }
+
+    return `
+      <div class="pc-card ${cls}" id="card-${pc.label}">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start">
+          <span class="pc-label-badge">${pc.label}</span>
+          <span class="conn-dot ${offline?'off':'on'}" title="${offline?'Offline':'Online'}"></span>
+        </div>
+        <div class="pc-status-row">
+          <span class="badge badge-${pc.status==='occupied'?'active':pc.status==='available'?'completed':pc.status==='reserved'?'reserved':'idle'}">${pc.status.charAt(0).toUpperCase()+pc.status.slice(1)}</span>
+        </div>
+        ${body}
+      </div>`;
+  }).join("");
+
+  // Restart timers for occupied PCs
+  Object.values(timers).forEach(clearInterval);
+  timers = {};
+  pcs.filter(p => p.status === "occupied" && p.session).forEach(pc => {
+    let secs = pc.session.elapsed_seconds;
+    let bill = pc.session.total;
+    const rate = pc.session.rate_per_hour;
+    timers[pc.label] = setInterval(() => {
+      secs++;
+      bill = (secs / 3600) * rate + pc.session.print_charge;
+      const te = document.getElementById("timer-"+pc.label);
+      const be = document.getElementById("bill-"+pc.label);
+      if (te) te.textContent = fmt(secs);
+      if (be) be.textContent = "₱" + bill.toFixed(2);
+    }, 1000);
+  });
+}
+
+function renderTable(pcs) {
+  const occupied = pcs.filter(p => p.status === "occupied" && p.session);
+  const tbody    = document.getElementById("sessions-tbody");
+  if (!occupied.length) {
+    tbody.innerHTML = `<tr><td colspan="7" class="text-center text-muted" style="padding:28px">No active sessions</td></tr>`;
+    return;
+  }
+  tbody.innerHTML = occupied.map(pc => {
+    const s = pc.session;
+    return `<tr>
+      <td><code>${s.session_code}</code></td>
+      <td><strong>${s.customer_name}</strong></td>
+      <td><span style="background:var(--primary);color:#fff;padding:3px 10px;border-radius:6px;font-size:.8rem;font-weight:600">${pc.label}</span></td>
+      <td class="text-muted">${s.started_at||"—"}</td>
+      <td style="font-family:monospace;color:var(--primary);font-weight:600" id="tbl-timer-${pc.label}">${fmt(s.elapsed_seconds)}</td>
+      <td class="fw-bold" style="color:var(--primary)" id="tbl-bill-${pc.label}">₱${s.total.toFixed(2)}</td>
+      <td style="display:flex;gap:6px">
+        <button class="btn btn-danger btn-sm"  onclick="openEndModal(${JSON.stringify(pc).replace(/"/g,'&quot;')})">End</button>
+      </td>
+    </tr>`;
+  }).join("");
+}
+
+function updateBadges(pcs) {
+  const active    = pcs.filter(p => p.status === "occupied").length;
+  const available = pcs.filter(p => p.status === "available").length;
+  document.getElementById("badge-active").textContent    = active    + " Active";
+  document.getElementById("badge-available").textContent = available + " Available";
+}
+
+function fmt(s) {
+  const h = Math.floor(s/3600), m = Math.floor((s%3600)/60), sec = s%60;
+  return `${String(h).padStart(2,"0")}:${String(m).padStart(2,"0")}:${String(sec).padStart(2,"0")}`;
+}
+
+// ── Start Modal ──
+function openStartModal(pc) {
+  selected = { pc, action: "start" };
+  document.getElementById("start-modal-title").textContent = `Start Session — ${pc.label}`;
+  document.getElementById("start-customer").value = "";
+  document.getElementById("start-rate").value     = "20";
+  document.getElementById("start-modal").classList.add("active");
+  setTimeout(() => document.getElementById("start-customer").focus(), 100);
+}
+
+async function confirmStart() {
+  const name = document.getElementById("start-customer").value.trim();
+  if (!name) { showToast("Enter customer name", "error"); return; }
+  const rate = parseFloat(document.getElementById("start-rate").value) || 20;
+
+  let res, data;
+  try {
+    res = await fetch("/api/session/start", {
+      method: "POST", headers: {"Content-Type":"application/json"},
+      body: JSON.stringify({ pc_id: selected.pc.id, customer_name: name, rate_per_hour: rate })
+    });
+  } catch(e) {
+    // Genuine network failure (server unreachable)
+    showToast("Cannot reach server — check LAN", "error"); return;
+  }
+
+  if (res.status === 409) {
+    const err = await res.json().catch(() => ({}));
+    showToast(err.error || "PC already occupied", "error"); return;
+  }
+  if (!res.ok) {
+    showToast("Failed to start session (HTTP " + res.status + ")", "error"); return;
+  }
+
+  try { data = await res.json(); } catch(e) { data = { success: true }; }
+  if (data && data.error) { showToast(data.error, "error"); return; }
+
+  const savedName  = name;
+  const savedLabel = selected.pc.label;
+  closeModal("start-modal");
+  showToast("Session started for " + savedName + " on " + savedLabel, "success");
+  // Grid refresh comes via pc_update SocketIO event — no loadGrid() needed here
+  setTimeout(loadGrid, 800);  // fallback refresh after 800ms if socket delayed
+}
+
+// ── End Modal ──
+function openEndModal(pc) {
+  selected = { pc, action: "end" };
+  const s = pc.session;
+  document.getElementById("end-customer").textContent  = s.customer_name;
+  document.getElementById("end-pc").textContent        = pc.label;
+  document.getElementById("end-bill").textContent      = "₱" + s.total.toFixed(2);
+  document.getElementById("end-internet").textContent  = "₱" + s.internet_charge.toFixed(2);
+  document.getElementById("end-print").textContent     = "₱" + s.print_charge.toFixed(2);
+  // Receipt
+  document.getElementById("r-code").textContent        = s.session_code;
+  document.getElementById("r-customer").textContent    = s.customer_name;
+  document.getElementById("r-pc").textContent          = pc.label;
+  document.getElementById("r-duration").textContent    = fmt(s.elapsed_seconds);
+  document.getElementById("r-internet").textContent    = "₱" + s.internet_charge.toFixed(2);
+  document.getElementById("r-print").textContent       = "₱" + s.print_charge.toFixed(2);
+  document.getElementById("r-total").textContent       = "₱" + s.total.toFixed(2);
+  document.getElementById("end-modal").classList.add("active");
+}
+
+async function confirmEnd() {
+  let res, data;
+  try {
+    res = await fetch("/api/session/end", {
+      method: "POST", headers: {"Content-Type":"application/json"},
+      body: JSON.stringify({ session_id: selected.pc.session.id })
+    });
+  } catch(e) {
+    showToast("Cannot reach server — check LAN", "error"); return;
+  }
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    showToast(err.error || "Failed to end session (HTTP " + res.status + ")", "error"); return;
+  }
+
+  try { data = await res.json(); } catch(e) { data = { success: true, session: { total: 0 } }; }
+  if (data && data.error) { showToast(data.error, "error"); return; }
+
+  const total = data.session ? data.session.total : 0;
+  closeModal("end-modal");
+  showToast("Session ended. Total: ₱" + parseFloat(total).toFixed(2), "success");
+  setTimeout(loadGrid, 800);
+}
+
+
+function closeModal(id) {
+  document.getElementById(id).classList.remove("active");
+  selected = null;
+}
+
+// Close modal on overlay click
+document.querySelectorAll(".modal-overlay").forEach(el => {
+  el.addEventListener("click", e => { if (e.target === el) el.classList.remove("active"); });
+});
+
+// Enter key in customer name field
+document.getElementById("start-customer").addEventListener("keydown", e => {
+  if (e.key === "Enter") confirmStart();
+});
+
+// ── End Request state ──
+let endRequestMap = {};  // pc_label -> session data
+
+function showEndRequests() {
+  const panel = document.getElementById("sm-end-requests");
+  const list  = document.getElementById("sm-end-req-list");
+  const keys  = Object.keys(endRequestMap);
+  if (!keys.length) { panel.style.display = "none"; return; }
+  panel.style.display = "block";
+  const count = keys.length;
+  document.getElementById("sm-end-req-title").textContent =
+    count === 1
+      ? "⚠ Customer requesting to end session — click End on their PC card to process"
+      : "⚠ " + count + " customers requesting to end their sessions";
+  list.innerHTML = keys.map(pc => {
+    const d = endRequestMap[pc];
+    return `<div style="background:rgba(255,255,255,.18);border-radius:8px;padding:5px 12px;font-size:.82rem;font-weight:700;display:inline-flex;align-items:center;gap:6px">
+      <span>${d.pc_label}</span>
+      <span style="opacity:.8;font-weight:400">${d.customer_name}</span>
+      <span style="background:rgba(255,255,255,.25);padding:1px 6px;border-radius:4px">₱${parseFloat(d.total||0).toFixed(2)}</span>
+      <button onclick="dismissEndRequest('${pc}')" style="background:none;border:none;color:rgba(255,255,255,.7);cursor:pointer;font-size:1rem;padding:0 2px">✕</button>
+    </div>`;
+  }).join("");
+}
+
+function dismissEndRequest(pc) {
+  delete endRequestMap[pc];
+  showEndRequests();
+}
+
+function dismissAllEndRequests() {
+  endRequestMap = {};
+  showEndRequests();
+}
+
+// ── SocketIO ──
+icms.on("pc_update", (data) => {
+  pcGrid = data;
+  renderGrid(data);
+  renderTable(data);
+  updateBadges(data);
+  // Auto-dismiss end requests for PCs that are now available (session ended)
+  data.forEach(pc => {
+    if (pc.status === "available" && endRequestMap[pc.label]) {
+      delete endRequestMap[pc.label];
+    }
+  });
+  showEndRequests();
+});
+
+icms.on("connect", () => {
+  icms.emit("request_pc_grid");
+  loadGrid();
+  loadRates();
+});
+
+icms.on("client_end_request", (data) => {
+  endRequestMap[data.pc_label] = data;
+  showEndRequests();
+  // Also highlight the PC card
+  const card = document.getElementById("card-" + data.pc_label);
+  if (card) {
+    card.style.boxShadow = "0 0 0 3px #b91c1c, 0 4px 20px rgba(185,28,28,.4)";
+    card.style.borderColor = "#b91c1c";
+  }
+});
+
+icms.on("rates_updated", (d) => {
+  if (d.internet_rate)    document.getElementById("sm-rate-display").textContent = "₱"+parseFloat(d.internet_rate).toFixed(2)+"/hr";
+  if (d.print_rate_bw)    document.getElementById("sm-bw-display").textContent   = "₱"+parseFloat(d.print_rate_bw).toFixed(2)+"/p";
+  if (d.print_rate_color) document.getElementById("sm-color-display").textContent= "₱"+parseFloat(d.print_rate_color).toFixed(2)+"/p";
+  const iField = document.getElementById("start-rate");
+  if (iField && d.internet_rate) iField.value = parseFloat(d.internet_rate).toFixed(2);
+});
+
+async function loadRates() {
+  try {
+    const res = await fetch("/api/rates");
+    const d   = await res.json();
+    if (d.internet_rate)    document.getElementById("sm-rate-display").textContent = "₱"+parseFloat(d.internet_rate).toFixed(2)+"/hr";
+    if (d.print_rate_bw)    document.getElementById("sm-bw-display").textContent   = "₱"+parseFloat(d.print_rate_bw).toFixed(2)+"/p";
+    if (d.print_rate_color) document.getElementById("sm-color-display").textContent= "₱"+parseFloat(d.print_rate_color).toFixed(2)+"/p";
+    const iField = document.getElementById("start-rate");
+    if (iField && d.internet_rate) iField.value = parseFloat(d.internet_rate).toFixed(2);
+  } catch(e) {}
+}
+
+// Initial load
+loadGrid();
+loadRates();
+</script>
+{% endblock %}

@@ -1,0 +1,655 @@
+{% extends "admin/base.html" %}
+{% block title %}AI Insights — ICMS-ASI{% endblock %}
+
+{% block extra_css %}
+<style>
+  /* ── Layout ─────────────────────────────────────────────── */
+  .ai-main {
+    display: grid;
+    grid-template-columns: 1fr 320px;
+    gap: 20px;
+    align-items: start;
+  }
+  @media(max-width:1024px){ .ai-main { grid-template-columns: 1fr; } }
+
+  /* ── Chat window ─────────────────────────────────────────── */
+  .chat-window {
+    background: var(--white);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow);
+    display: flex;
+    flex-direction: column;
+    height: 600px;
+  }
+
+  .chat-header {
+    padding: 16px 20px;
+    border-bottom: 1px solid var(--accent);
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .chat-header-icon {
+    width: 36px; height: 36px;
+    background: var(--grad-primary);
+    border-radius: 10px;
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0;
+  }
+
+  .chat-header-title {
+    font-weight: 700;
+    font-size: .9rem;
+    color: var(--text-dark);
+  }
+  .chat-header-sub {
+    font-size: .7rem;
+    color: var(--text-light);
+    margin-top: 1px;
+  }
+
+  .model-pill {
+    margin-left: auto;
+    background: var(--surface);
+    border: 1px solid var(--accent);
+    border-radius: 20px;
+    padding: 3px 10px;
+    font-size: .7rem;
+    font-weight: 600;
+    color: var(--text-mid);
+    display: flex;
+    align-items: center;
+    gap: 5px;
+  }
+  .model-pill-dot {
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: #10b981;
+    flex-shrink: 0;
+  }
+  .model-pill-dot.offline { background: #ef4444; }
+
+  .chat-body {
+    flex: 1;
+    overflow-y: auto;
+    padding: 20px 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    scroll-behavior: smooth;
+  }
+
+  /* ── Messages ────────────────────────────────────────────── */
+  .msg { display: flex; gap: 10px; animation: msgIn .2s ease; }
+  .msg.user { flex-direction: row-reverse; }
+  @keyframes msgIn { from{transform:translateY(6px);opacity:0} to{transform:translateY(0);opacity:1} }
+
+  .msg-avatar {
+    width: 30px; height: 30px;
+    border-radius: 8px;
+    flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .msg-avatar.ai   { background: var(--primary); }
+  .msg-avatar.user { background: var(--secondary); }
+
+  .msg-bubble {
+    max-width: 78%;
+    padding: 11px 15px;
+    font-size: .855rem;
+    line-height: 1.65;
+    border-radius: 4px 14px 14px 14px;
+  }
+  .msg-bubble.ai      { background: var(--surface); color: var(--text-dark); }
+  .msg-bubble.user    { background: var(--primary); color: #fff; border-radius: 14px 4px 14px 14px; }
+  .msg-bubble.error   { background: #fef2f2; color: #991b1b; border: 1px solid #fecaca; }
+  .msg-bubble.thinking{ background: var(--surface); color: var(--text-light); font-style: italic; }
+  .msg-bubble ul, .msg-bubble ol { padding-left: 18px; margin: 6px 0; }
+  .msg-bubble li { margin-bottom: 4px; }
+  .msg-bubble strong { color: var(--primary); font-weight: 700; }
+  .msg-bubble.user strong { color: #fff; }
+
+  /* Thinking animation */
+  .thinking-dots span {
+    display: inline-block;
+    width: 5px; height: 5px;
+    border-radius: 50%;
+    background: var(--text-light);
+    margin: 0 2px;
+    animation: dot-bounce .9s infinite;
+  }
+  .thinking-dots span:nth-child(2){ animation-delay:.15s; }
+  .thinking-dots span:nth-child(3){ animation-delay:.3s; }
+  @keyframes dot-bounce {
+    0%,80%,100%{ transform:translateY(0); opacity:.4; }
+    40%{ transform:translateY(-5px); opacity:1; }
+  }
+
+  /* ── Footer / input ──────────────────────────────────────── */
+  .chat-footer {
+    padding: 12px 14px;
+    border-top: 1px solid var(--accent);
+    display: flex;
+    gap: 8px;
+    align-items: flex-end;
+  }
+  .chat-footer textarea {
+    flex: 1;
+    border: 1.5px solid var(--accent);
+    border-radius: var(--radius);
+    padding: 9px 12px;
+    font-size: .855rem;
+    resize: none;
+    font-family: inherit;
+    outline: none;
+    transition: border-color .15s;
+    max-height: 120px;
+  }
+  .chat-footer textarea:focus { border-color: var(--primary); }
+
+  .btn-send {
+    width: 38px; height: 38px;
+    background: var(--primary);
+    border: none;
+    border-radius: var(--radius);
+    display: flex; align-items: center; justify-content: center;
+    cursor: pointer;
+    flex-shrink: 0;
+    transition: opacity .15s;
+  }
+  .btn-send:hover   { opacity: .85; }
+  .btn-send:disabled{ opacity: .4; cursor: not-allowed; }
+
+  /* ── Mode tabs ───────────────────────────────────────────── */
+  .mode-row {
+    display: flex;
+    gap: 6px;
+    margin-bottom: 10px;
+    background: var(--surface);
+    border-radius: var(--radius);
+    padding: 4px;
+  }
+  .mode-btn {
+    flex: 1;
+    padding: 7px 10px;
+    border-radius: calc(var(--radius) - 2px);
+    border: none;
+    background: transparent;
+    font-size: .78rem;
+    font-weight: 600;
+    cursor: pointer;
+    color: var(--text-mid);
+    transition: all .15s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+  }
+  .mode-btn.active {
+    background: var(--white);
+    color: var(--primary);
+    box-shadow: 0 1px 4px rgba(0,0,0,.1);
+  }
+  .mode-btn:hover:not(.active) { color: var(--text-dark); }
+
+  /* ── Right sidebar ───────────────────────────────────────── */
+  .sidebar-stack { display: flex; flex-direction: column; gap: 16px; }
+
+  /* Quick prompts */
+  .quick-btn {
+    width: 100%;
+    text-align: left;
+    padding: 10px 13px;
+    border-radius: var(--radius);
+    border: 1px solid var(--accent);
+    background: var(--white);
+    cursor: pointer;
+    font-size: .8rem;
+    font-weight: 600;
+    color: var(--text-dark);
+    transition: all .15s;
+    margin-bottom: 5px;
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    line-height: 1.35;
+  }
+  .quick-btn:hover { background: var(--surface); border-color: var(--primary); color: var(--primary); }
+  .quick-btn:last-child { margin-bottom: 0; }
+
+  .quick-icon {
+    width: 28px; height: 28px;
+    background: var(--surface);
+    border-radius: 7px;
+    flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center;
+  }
+
+  /* Snapshot */
+  .snap-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 0; }
+  .snap-card {
+    background: var(--surface);
+    border-radius: var(--radius);
+    padding: 10px 12px;
+  }
+  .snap-label { font-size: .65rem; color: var(--text-light); text-transform: uppercase; letter-spacing: .06em; }
+  .snap-value { font-size: .98rem; font-weight: 700; color: var(--primary); margin-top: 3px; }
+
+  /* Ollama status card */
+  .status-chip {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 12px;
+    border-radius: var(--radius);
+    font-size: .8rem;
+    font-weight: 600;
+    margin-bottom: 12px;
+  }
+  .status-chip.online  { background: #d1fae5; color: #065f46; }
+  .status-chip.offline { background: #fee2e2; color: #991b1b; }
+  .status-indicator {
+    width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0;
+  }
+  .status-chip.online  .status-indicator { background: #10b981; }
+  .status-chip.offline .status-indicator { background: #ef4444; }
+
+  .setup-guide {
+    background: #fffbeb;
+    border: 1px solid #fcd34d;
+    border-radius: var(--radius);
+    padding: 12px 14px;
+    font-size: .78rem;
+    color: var(--text-mid);
+    margin-bottom: 12px;
+    display: none;
+  }
+  .setup-guide ol {
+    margin: 8px 0 0 0;
+    padding-left: 18px;
+    line-height: 1.9;
+  }
+  .setup-guide code {
+    background: #1e1e2e;
+    color: #cdd6f4;
+    padding: 2px 7px;
+    border-radius: 4px;
+    font-size: .73rem;
+  }
+  .setup-note {
+    margin-top: 8px;
+    padding-top: 8px;
+    border-top: 1px solid #fcd34d;
+    font-size: .72rem;
+    color: var(--text-light);
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <h1>AI Insights</h1>
+  <p>Local AI business intelligence — free, unlimited, runs on your PC</p>
+</div>
+
+<div class="ai-main">
+
+  <!-- ── Left: Chat ── -->
+  <div>
+
+    <!-- Mode tabs -->
+    <div class="mode-row">
+      <button class="mode-btn active" onclick="setMode('insights')" id="mode-insights">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M12 2a7 7 0 0 1 7 7c0 3.5-2.5 5.9-3 8H8c-.5-2.1-3-4.5-3-8a7 7 0 0 1 7-7z"/><line x1="9" y1="21" x2="15" y2="21"/><line x1="10" y1="18" x2="14" y2="18"/></svg>
+        Insights
+      </button>
+      <button class="mode-btn" onclick="setMode('predict')" id="mode-predict">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+        Predict
+      </button>
+      <button class="mode-btn" onclick="setMode('question')" id="mode-question">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="12" cy="12" r="10"/><path d="M9 9a3 3 0 0 1 6 0c0 1.5-1.5 2.5-3 3"/><line x1="12" y1="17" x2="12.01" y2="17" stroke-width="3" stroke-linecap="round"/></svg>
+        Ask
+      </button>
+    </div>
+
+    <!-- Chat window -->
+    <div class="chat-window">
+
+      <!-- Header -->
+      <div class="chat-header">
+        <div class="chat-header-icon">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+        </div>
+        <div>
+          <div class="chat-header-title">Hive AI Assistant</div>
+          <div class="chat-header-sub">Powered by Ollama — local, free, unlimited</div>
+        </div>
+        <div class="model-pill">
+          <div class="model-pill-dot offline" id="model-dot"></div>
+          <span id="ai-model-tag">Checking...</span>
+        </div>
+      </div>
+
+      <!-- Body -->
+      <div class="chat-body" id="chat-body">
+        <div class="msg">
+          <div class="msg-avatar ai">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 8v4m0 4h.01"/></svg>
+          </div>
+          <div class="msg-bubble ai">
+            <strong>Hello, I'm your Hive AI Assistant.</strong><br><br>
+            I can analyze your café's live data and give insights on revenue, peak hours, customer patterns, and more.<br><br>
+            Use the <strong>quick prompts</strong> on the right, or type your own question. Make sure <strong>Ollama is running</strong> on this PC first.
+          </div>
+        </div>
+      </div>
+
+      <!-- Footer -->
+      <div class="chat-footer">
+        <textarea id="chat-input" rows="1" placeholder="Ask about revenue, sessions, peak hours..."
+                  onkeydown="handleKey(event)"
+                  oninput="this.style.height='auto';this.style.height=this.scrollHeight+'px'"></textarea>
+        <button class="btn-send" id="btn-send" onclick="sendMessage()">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Right: Sidebar ── -->
+  <div class="sidebar-stack">
+
+    <!-- Live snapshot -->
+    <div class="card">
+      <div class="card-header">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--primary)" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+        <span class="card-title">Live Snapshot</span>
+      </div>
+      <div class="snap-grid">
+        <div class="snap-card"><div class="snap-label">Active PCs</div><div class="snap-value" id="snap-active">—</div></div>
+        <div class="snap-card"><div class="snap-label">Today</div><div class="snap-value" id="snap-today">—</div></div>
+        <div class="snap-card"><div class="snap-label">This Week</div><div class="snap-value" id="snap-week">—</div></div>
+        <div class="snap-card"><div class="snap-label">This Month</div><div class="snap-value" id="snap-month">—</div></div>
+        <div class="snap-card"><div class="snap-label">Sessions</div><div class="snap-value" id="snap-sessions">—</div></div>
+        <div class="snap-card"><div class="snap-label">Top PC</div><div class="snap-value" id="snap-toppc">—</div></div>
+      </div>
+    </div>
+
+    <!-- Quick prompts -->
+    <div class="card">
+      <div class="card-header">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--primary)" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+        <span class="card-title">Quick Prompts</span>
+      </div>
+      <div id="quick-btns">
+        <div style="font-size:.8rem;color:var(--text-light)">Loading...</div>
+      </div>
+    </div>
+
+    <!-- Ollama config -->
+    <div class="card">
+      <div class="card-header">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--primary)" stroke-width="2"><rect x="2" y="2" width="20" height="20" rx="4"/><circle cx="12" cy="12" r="3"/><line x1="12" y1="2" x2="12" y2="6"/><line x1="12" y1="18" x2="12" y2="22"/><line x1="2" y1="12" x2="6" y2="12"/><line x1="18" y1="12" x2="22" y2="12"/></svg>
+        <span class="card-title">Local AI Config</span>
+      </div>
+
+      <div class="status-chip offline" id="ollama-status">
+        <div class="status-indicator"></div>
+        <span id="ollama-status-text">Checking Ollama...</span>
+      </div>
+
+      <div class="setup-guide" id="ollama-setup">
+        <strong>One-time setup</strong>
+        <ol>
+          <li>Download at <a href="https://ollama.com/download" target="_blank" style="color:var(--primary);font-weight:600">ollama.com/download</a></li>
+          <li>Install and run it</li>
+          <li>Open a terminal and run:<br><code>ollama pull gemma3:1b</code></li>
+          <li>Click <strong>Check Again</strong></li>
+        </ol>
+        <div class="setup-note">Free · No API key · No internet · Unlimited use</div>
+      </div>
+
+      <div class="form-group" style="margin-bottom:8px">
+        <label style="font-size:.75rem;font-weight:600;color:var(--text-mid)">Model</label>
+        <select id="ollama-model-select" class="form-control" style="font-size:.82rem">
+          <option value="gemma3:1b">gemma3:1b — Fastest (1B)</option>
+          <option value="gemma3:4b">gemma3:4b — Balanced (4B)</option>
+          <option value="llama3.2:1b">llama3.2:1b — Tiny Llama</option>
+          <option value="llama3.2:3b">llama3.2:3b — Small Llama</option>
+          <option value="qwen2.5:1.5b">qwen2.5:1.5b — Qwen Tiny</option>
+          <option value="mistral:7b">mistral:7b — Best quality</option>
+        </select>
+      </div>
+
+      <div class="form-group" style="margin-bottom:10px">
+        <label style="font-size:.75rem;font-weight:600;color:var(--text-mid)">Ollama URL</label>
+        <input class="form-control" type="text" id="ollama-url-input"
+               value="http://localhost:11434" style="font-size:.82rem">
+      </div>
+
+      <div style="display:flex;gap:6px">
+        <button class="btn btn-primary btn-sm" onclick="saveOllamaConfig()" style="flex:1;justify-content:center">Save</button>
+        <button class="btn btn-secondary btn-sm" onclick="loadAiConfig()" style="flex:1;justify-content:center">Check Again</button>
+      </div>
+    </div>
+
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+let currentMode = "insights";
+let isLoading   = false;
+
+// ── Mode ────────────────────────────────────────────────────
+function setMode(mode) {
+  currentMode = mode;
+  document.querySelectorAll(".mode-btn").forEach(b => b.classList.remove("active"));
+  document.getElementById("mode-" + mode).classList.add("active");
+  const ph = {
+    insights: "Ask for business insights...",
+    predict:  "Ask for revenue predictions...",
+    question: "Ask anything about your café data..."
+  };
+  document.getElementById("chat-input").placeholder = ph[mode] || "Ask anything...";
+}
+
+// ── Chat ─────────────────────────────────────────────────────
+function handleKey(e) {
+  if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(); }
+}
+
+function appendMsg(role, html, type) {
+  const body   = document.getElementById("chat-body");
+  const isUser = role === "user";
+  const div    = document.createElement("div");
+  div.className = "msg" + (isUser ? " user" : "");
+
+  const avatarSvg = isUser
+    ? `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--primary)" stroke-width="2"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/></svg>`
+    : `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 8v4m0 4h.01"/></svg>`;
+
+  const bubbleClass = type ? `msg-bubble ${type}` : `msg-bubble ${isUser ? "user" : "ai"}`;
+  div.innerHTML = `
+    <div class="msg-avatar ${isUser ? "user" : "ai"}">${avatarSvg}</div>
+    <div class="${bubbleClass}">${html}</div>`;
+  body.appendChild(div);
+  body.scrollTop = body.scrollHeight;
+  return div;
+}
+
+function formatText(raw) {
+  return raw
+    .replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;")
+    .replace(/\*\*(.*?)\*\*/g,"<strong>$1</strong>")
+    .replace(/\*(.*?)\*/g,"<em>$1</em>")
+    .replace(/^[•\-]\s(.+)$/gm,"<li>$1</li>")
+    .replace(/(<li>.*?<\/li>)/gs,"<ul>$1</ul>")
+    .replace(/\n\n/g,"<br><br>").replace(/\n/g,"<br>");
+}
+
+let thinkingDiv = null;
+function showThinking() {
+  thinkingDiv = appendMsg("ai",
+    `<span class="thinking-dots"><span></span><span></span><span></span></span> Analyzing your café data...`,
+    "thinking");
+}
+function hideThinking() {
+  if (thinkingDiv) { thinkingDiv.remove(); thinkingDiv = null; }
+}
+
+async function sendMessage(customPrompt) {
+  if (isLoading) return;
+  const input  = document.getElementById("chat-input");
+  const prompt = customPrompt || input.value.trim();
+  if (!prompt) return;
+
+  appendMsg("user", prompt.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"));
+  input.value = "";
+  input.style.height = "auto";
+  isLoading = true;
+  document.getElementById("btn-send").disabled = true;
+  showThinking();
+
+  try {
+    const res  = await fetch("/api/ai/insights", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ prompt, mode: currentMode })
+    });
+    const data = await res.json();
+    hideThinking();
+
+    if (data.error) {
+      let msg = "";
+      if (data.error === "ollama_offline") {
+        msg = "Ollama is not running on this PC.<br><br>" +
+          "Open a terminal and run: <code style=\'background:#1e1e2e;color:#cdd6f4;padding:1px 6px;border-radius:4px\'>ollama serve</code><br>" +
+          "Or open the Ollama app if installed. Then click <strong>Check Again</strong> in the config panel.";
+      } else if (data.error === "empty_response") {
+        msg = "The AI returned an empty response. Try rephrasing your question.";
+      } else {
+        msg = "Error: " + data.error.replace(/</g,"&lt;");
+      }
+      appendMsg("ai", msg, "error");
+    } else {
+      if (data.model) {
+        document.getElementById("ai-model-tag").textContent = data.model;
+        document.getElementById("model-dot").classList.remove("offline");
+      }
+      appendMsg("ai", formatText(data.response));
+    }
+  } catch(e) {
+    hideThinking();
+    appendMsg("ai", "Network error — check your connection.", "error");
+  } finally {
+    isLoading = false;
+    document.getElementById("btn-send").disabled = false;
+    document.getElementById("chat-input").focus();
+  }
+}
+
+// ── Quick prompts ────────────────────────────────────────────
+async function loadQuickPrompts() {
+  try {
+    const res  = await fetch("/api/ai/quick-insights");
+    const data = await res.json();
+    const container = document.getElementById("quick-btns");
+    container.innerHTML = data.map((q, i) => `
+      <button class="quick-btn" data-prompt="${q.prompt.replace(/"/g, "&quot;")}" data-mode="${q.mode}">
+        <span>${q.label}</span>
+      </button>`).join("");
+    document.querySelectorAll(".quick-btn").forEach(btn => {
+      btn.addEventListener("click", () => {
+        const prompt = btn.getAttribute("data-prompt");
+        const mode = btn.getAttribute("data-mode");
+        quickSend(prompt, mode);
+      });
+    });
+  } catch(e) {
+    document.getElementById("quick-btns").innerHTML =
+      '<div style="font-size:.8rem;color:var(--text-light)">Could not load prompts.</div>';
+  }
+}
+
+function quickSend(prompt, mode) {
+  setMode(mode);
+  sendMessage(prompt);
+}
+
+// ── Snapshot ─────────────────────────────────────────────────
+async function loadSnapshot() {
+  try {
+    const res = await fetch("/api/reports/overview");
+    const d   = await res.json();
+    document.getElementById("snap-active").textContent   = d.active_count   || 0;
+    document.getElementById("snap-today").textContent    = "₱" + parseFloat(d.today_revenue  || 0).toFixed(2);
+    document.getElementById("snap-week").textContent     = "₱" + parseFloat(d.week_revenue   || 0).toFixed(2);
+    document.getElementById("snap-month").textContent    = "₱" + parseFloat(d.month_revenue  || 0).toFixed(2);
+    document.getElementById("snap-sessions").textContent = d.total_sessions || 0;
+    document.getElementById("snap-toppc").textContent    = d.top_pc || "—";
+  } catch(e) {}
+}
+
+// ── Ollama Config ────────────────────────────────────────────
+async function loadAiConfig() {
+  try {
+    const res  = await fetch("/api/ai/config");
+    const data = await res.json();
+    const chip     = document.getElementById("ollama-status");
+    const chipText = document.getElementById("ollama-status-text");
+    const dot      = document.getElementById("model-dot");
+    const setupEl  = document.getElementById("ollama-setup");
+
+    if (data.url)   document.getElementById("ollama-url-input").value = data.url;
+    if (data.model) {
+      const sel = document.getElementById("ollama-model-select");
+      let found = false;
+      for (let o of sel.options) { if (o.value === data.model) { sel.value = data.model; found = true; break; } }
+      if (!found) {
+        const opt = new Option(data.model + " (custom)", data.model);
+        sel.appendChild(opt); sel.value = data.model;
+      }
+      document.getElementById("ai-model-tag").textContent = data.model;
+    }
+
+    if (data.online) {
+      chip.className    = "status-chip online";
+      chipText.textContent = "Ollama is running — AI ready";
+      dot.classList.remove("offline");
+      setupEl.style.display = "none";
+    } else {
+      chip.className    = "status-chip offline";
+      chipText.textContent = "Ollama not detected";
+      dot.classList.add("offline");
+      setupEl.style.display = "block";
+    }
+  } catch(e) {}
+}
+
+async function saveOllamaConfig() {
+  const url   = document.getElementById("ollama-url-input").value.trim();
+  const model = document.getElementById("ollama-model-select").value;
+  if (!url || !model) { showToast("URL and model required", "warning"); return; }
+
+  const res  = await fetch("/api/ai/config", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ ollama_url: url, ollama_model: model })
+  });
+  const data = await res.json();
+  if (data.success) { showToast("Settings saved", "success"); loadAiConfig(); }
+  else { showToast("Failed to save", "error"); }
+}
+
+// ── Init ─────────────────────────────────────────────────────
+loadSnapshot();
+loadQuickPrompts();
+loadAiConfig();
+icms.on("connect",   () => loadSnapshot());
+icms.on("pc_update", () => loadSnapshot());
+</script>
+{% endblock %}

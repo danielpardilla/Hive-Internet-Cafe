@@ -1,0 +1,471 @@
+{% extends "admin/base.html" %}
+{% block title %}Billing — ICMS-ASI{% endblock %}
+
+{% block extra_css %}
+<style>
+  .bill-tabs { display:flex; gap:4px; margin-bottom:20px; }
+  .bill-tab  { padding:8px 20px; border-radius:var(--radius); border:1.5px solid var(--accent);
+               background:var(--white); font-size:.875rem; font-weight:600; color:var(--text-mid);
+               cursor:pointer; transition:all .18s; }
+  .bill-tab.active { background:var(--primary); color:var(--white); border-color:var(--primary); }
+
+  .tab-panel { display:none; }
+  .tab-panel.active { display:block; }
+
+  /* Rate config card */
+  .rate-row { display:flex; align-items:center; gap:12px; }
+  .rate-row .form-control { max-width:120px; }
+  .rate-label { font-size:.875rem; font-weight:600; color:var(--primary); min-width:140px; }
+
+  /* Billing table status */
+  .badge-paid    { background:#c6f6d5; color:#276749; }
+  .badge-ended   { background:#feebc8; color:#c05621; }
+  .badge-active  { background:#bee3f8; color:#2c5282; }
+
+  /* Receipt modal */
+  .receipt-modal .modal-box { max-width:520px; }
+  .receipt-full {
+    background:var(--white); border:1px dashed var(--accent);
+    border-radius:var(--radius); padding:24px; font-family:'Courier New',monospace;
+    font-size:.82rem; line-height:2;
+  }
+  .r-row  { display:flex; justify-content:space-between; }
+  .r-head { text-align:center; font-weight:700; font-size:1rem; color:var(--primary); margin-bottom:4px; }
+  .r-sub  { text-align:center; font-size:.75rem; color:var(--text-light); margin-bottom:8px; }
+  .r-div  { border:none; border-top:1px dashed var(--accent); margin:6px 0; }
+  .r-total{ font-size:1.1rem; font-weight:700; color:var(--primary); }
+  .r-paid { text-align:center; background:#c6f6d5; color:#276749; border-radius:var(--radius);
+            padding:6px; font-weight:700; margin-top:8px; letter-spacing:.08em; }
+
+  /* Summary cards */
+  .sum-grid { display:grid; grid-template-columns:repeat(4,1fr); gap:14px; margin-bottom:24px; }
+  @media(max-width:1000px){ .sum-grid{ grid-template-columns:repeat(2,1fr); } }
+  .sum-card { background:var(--white); border-radius:var(--radius-lg); padding:18px 20px;
+              box-shadow:var(--shadow); }
+  .sum-card .lbl { font-size:.75rem; color:var(--text-light); text-transform:uppercase; letter-spacing:.05em; }
+  .sum-card .val { font-size:1.7rem; font-weight:700; color:var(--primary); }
+  .sum-card .sub { font-size:.75rem; color:var(--text-light); margin-top:2px; }
+  .chart-box { position:relative; height:220px; width:100%; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="page-header" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px">
+  <div>
+    <h1>Billing</h1>
+    <p>Revenue tracking, payment management, and rate configuration</p>
+  </div>
+  <button class="btn btn-secondary btn-sm" onclick="loadAll()">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+    Refresh
+  </button>
+</div>
+
+<!-- Summary Cards -->
+<div class="sum-grid">
+  <div class="sum-card">
+    <div class="lbl">Today — Internet</div>
+    <div class="val" id="s-internet">₱0.00</div>
+    <div class="sub" id="s-rate">@ ₱20.00/hr</div>
+  </div>
+  <div class="sum-card">
+    <div class="lbl">Today — Printing</div>
+    <div class="val" id="s-printing">₱0.00</div>
+    <div class="sub" id="s-prate">@ ₱3.00/page</div>
+  </div>
+  <div class="sum-card" style="background:var(--grad-primary)">
+    <div class="lbl" style="color:rgba(255,255,255,.7)">Today — Total</div>
+    <div class="val" id="s-total" style="color:white">₱0.00</div>
+    <div class="sub" style="color:rgba(255,255,255,.6)" id="s-running">+₱0.00 running</div>
+  </div>
+  <div class="sum-card">
+    <div class="lbl">Unpaid Sessions</div>
+    <div class="val" id="s-unpaid" style="color:var(--warning)">0</div>
+    <div class="sub" id="s-paid-count">0 paid today</div>
+  </div>
+</div>
+
+<!-- Tabs -->
+<div class="bill-tabs">
+  <button class="bill-tab active" onclick="switchTab('unpaid')">Unpaid Sessions</button>
+  <button class="bill-tab"        onclick="switchTab('history')">Billing History</button>
+  <button class="bill-tab"        onclick="switchTab('chart')">Revenue Chart</button>
+  <button class="bill-tab"        onclick="switchTab('config')">Rate Config</button>
+</div>
+
+<!-- ── Tab: Unpaid ── -->
+<div class="tab-panel active" id="tab-unpaid">
+  <div class="card">
+    <div class="card-header flex items-center gap-1" style="justify-content:space-between">
+      <span class="card-title">Unpaid Sessions</span>
+      <span class="badge badge-pending" id="unpaid-badge">0 pending</span>
+    </div>
+    <div class="table-wrapper">
+      <table>
+        <thead><tr><th>Session</th><th>Customer</th><th>PC</th><th>Ended At</th><th>Duration</th><th>Internet</th><th>Print</th><th>Total</th><th>Actions</th></tr></thead>
+        <tbody id="unpaid-tbody">
+          <tr><td colspan="9" class="text-center text-muted" style="padding:28px">No unpaid sessions</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- ── Tab: History ── -->
+<div class="tab-panel" id="tab-history">
+  <div class="card">
+    <div class="card-header flex items-center gap-1" style="justify-content:space-between">
+      <span class="card-title">Billing History</span>
+      <input type="text" class="form-control" id="history-search"
+             placeholder="Search customer or session..." style="max-width:240px;padding:7px 12px"
+             oninput="filterHistory()">
+    </div>
+    <div class="table-wrapper">
+      <table>
+        <thead><tr><th>Session</th><th>Customer</th><th>PC</th><th>Date</th><th>Duration</th><th>Internet</th><th>Print</th><th>Total</th><th>Status</th><th>Receipt</th></tr></thead>
+        <tbody id="history-tbody">
+          <tr><td colspan="10" class="text-center text-muted" style="padding:28px">Loading...</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- ── Tab: Revenue Chart ── -->
+<div class="tab-panel" id="tab-chart">
+  <div class="card">
+    <div class="card-header"><span class="card-title">7-Day Revenue Breakdown</span></div>
+    <div class="chart-box"><canvas id="revenueBar"></canvas></div>
+  </div>
+</div>
+
+<!-- ── Tab: Rate Config ── -->
+<div class="tab-panel" id="tab-config">
+  <div class="card" style="max-width:480px">
+    <div class="card-header"><span class="card-title">Billing Rate Configuration</span></div>
+    <p class="text-sm mb-3">Changes apply to new sessions immediately. Existing active sessions keep their original rate.</p>
+    <div class="form-group">
+      <label class="form-label">Internet Rate (₱ per hour)</label>
+      <div class="rate-row">
+        <span style="font-weight:700;color:var(--primary)">₱</span>
+        <input class="form-control" type="number" id="cfg-internet" value="20" min="1" step="0.50">
+        <span class="text-muted text-sm">/ hour</span>
+      </div>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Printing Rate — Black &amp; White (₱ per page)</label>
+      <div class="rate-row">
+        <span style="font-weight:700;color:var(--primary)">₱</span>
+        <input class="form-control" type="number" id="cfg-print-bw" value="3" min="1" step="0.50">
+        <span class="text-muted text-sm">/ page (B&amp;W)</span>
+      </div>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Printing Rate — Color (₱ per page)</label>
+      <div class="rate-row">
+        <span style="font-weight:700;color:var(--primary)">₱</span>
+        <input class="form-control" type="number" id="cfg-print-color" value="5" min="1" step="0.50">
+        <span class="text-muted text-sm">/ page (Color)</span>
+      </div>
+    </div>
+    <div style="background:var(--surface);border-radius:var(--radius);padding:12px;margin-bottom:12px;font-size:.82rem;color:var(--text-mid)">
+      <strong>Note:</strong> Saving rates will immediately update all active client sessions via SocketIO.
+      Internet rate changes also apply to currently running sessions.
+    </div>
+    <button class="btn btn-primary" onclick="saveRates()" style="margin-top:4px">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+      Save &amp; Push to All Clients
+    </button>
+  </div>
+</div>
+
+<!-- ── Receipt Modal ── -->
+<div class="modal-overlay receipt-modal" id="receipt-modal">
+  <div class="modal-box">
+    <div class="modal-header">
+      <h3>Receipt</h3>
+      <button class="modal-close" onclick="closeReceipt()">✕</button>
+    </div>
+    <div class="receipt-full" id="receipt-content">
+      <div class="r-head">ICMS-ASI</div>
+      <div class="r-sub">Internet Café Management System</div>
+      <hr class="r-div">
+      <div class="r-row"><span>Session:</span>  <span id="r-code">—</span></div>
+      <div class="r-row"><span>Customer:</span> <span id="r-cust">—</span></div>
+      <div class="r-row"><span>PC Unit:</span>  <span id="r-pc">—</span></div>
+      <div class="r-row"><span>Date:</span>     <span id="r-date">—</span></div>
+      <div class="r-row"><span>Started:</span>  <span id="r-start">—</span></div>
+      <div class="r-row"><span>Ended:</span>    <span id="r-end">—</span></div>
+      <div class="r-row"><span>Duration:</span> <span id="r-dur">—</span></div>
+      <hr class="r-div">
+      <div class="r-row"><span>Internet</span>  <span id="r-inet">—</span></div>
+      <div class="r-row"><span>Printing</span>  <span id="r-prt">—</span></div>
+      <hr class="r-div">
+      <div class="r-row r-total"><span>TOTAL</span><span id="r-tot">—</span></div>
+      <div class="r-paid" id="r-paid-stamp" style="display:none">✓ PAID</div>
+    </div>
+    <div style="display:flex;gap:8px;margin-top:16px" id="receipt-actions">
+      <button class="btn btn-secondary w-100" onclick="closeReceipt()" style="justify-content:center">Close</button>
+      <button class="btn btn-success   w-100" id="btn-mark-paid" onclick="markPaid()" style="justify-content:center">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
+        Mark as Paid
+      </button>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<script>
+let historyData   = [];
+let currentSession= null;
+let barChart      = null;
+
+// ── Tab Switch ─────────────────────────────────────────────────────────────
+function switchTab(tab) {
+  document.querySelectorAll(".bill-tab").forEach((b,i) => {
+    b.classList.toggle("active", ["unpaid","history","chart","config"][i] === tab);
+  });
+  document.querySelectorAll(".tab-panel").forEach(p => p.classList.remove("active"));
+  document.getElementById("tab-" + tab).classList.add("active");
+  if (tab === "history") loadHistory();
+  if (tab === "chart")   loadChart();
+  if (tab === "config")  loadConfig();
+}
+
+// ── Load All ───────────────────────────────────────────────────────────────
+async function loadAll() {
+  await Promise.all([loadSummary(), loadUnpaid()]);
+}
+
+// ── Summary ────────────────────────────────────────────────────────────────
+async function loadSummary() {
+  const res  = await fetch("/api/billing/summary");
+  const d    = await res.json();
+  document.getElementById("s-internet").textContent    = peso(d.today_internet);
+  document.getElementById("s-printing").textContent    = peso(d.today_printing);
+  document.getElementById("s-total").textContent       = peso(d.today_total);
+  document.getElementById("s-running").textContent     = "+" + peso(d.running_total) + " running";
+  document.getElementById("s-unpaid").textContent      = d.unpaid_count;
+  document.getElementById("s-paid-count").textContent  = d.paid_count + " paid today";
+  document.getElementById("s-rate").textContent  = "@ ₱" + parseFloat(d.internet_rate||20).toFixed(2) + "/hr";
+  document.getElementById("s-prate").textContent = "@ B&W ₱" + parseFloat(d.print_rate_bw||3).toFixed(2) + " · Color ₱" + parseFloat(d.print_rate_color||5).toFixed(2) + "/p";
+}
+
+// ── Unpaid Sessions ────────────────────────────────────────────────────────
+async function loadUnpaid() {
+  const res  = await fetch("/api/billing/unpaid");
+  const data = await res.json();
+  const tbody = document.getElementById("unpaid-tbody");
+  document.getElementById("unpaid-badge").textContent = data.length + " pending";
+
+  if (!data.length) {
+    tbody.innerHTML = `<tr><td colspan="9" class="text-center text-muted" style="padding:28px">
+      <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="var(--secondary)" stroke-width="1.5" style="display:block;margin:0 auto 8px">
+        <polyline points="20 6 9 17 4 12"/>
+      </svg>All sessions paid!</td></tr>`;
+    return;
+  }
+
+  tbody.innerHTML = data.map(s => `
+    <tr>
+      <td><code style="font-size:.78rem">${s.session_code}</code></td>
+      <td><strong>${s.customer_name}</strong></td>
+      <td><span style="background:var(--primary);color:#fff;padding:2px 8px;border-radius:6px;font-size:.78rem;font-weight:600">${s.pc_label}</span></td>
+      <td class="text-muted text-sm">${s.started_at || "—"}</td>
+      <td style="font-family:monospace">${fmtSec(s.elapsed_seconds)}</td>
+      <td>${peso(s.internet_charge)}</td>
+      <td>${peso(s.print_charge)}</td>
+      <td class="fw-bold" style="color:var(--primary)">${peso(s.total)}</td>
+      <td style="display:flex;gap:6px">
+        <button class="btn btn-secondary btn-sm" onclick="openReceipt(${s.id})">Receipt</button>
+        <button class="btn btn-success btn-sm"   onclick="quickPay(${s.id})">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+          Pay
+        </button>
+      </td>
+    </tr>`).join("");
+}
+
+// ── History ────────────────────────────────────────────────────────────────
+async function loadHistory() {
+  const res  = await fetch("/api/billing/history");
+  historyData = await res.json();
+  renderHistory(historyData);
+}
+
+function renderHistory(data) {
+  const tbody = document.getElementById("history-tbody");
+  if (!data.length) {
+    tbody.innerHTML = `<tr><td colspan="10" class="text-center text-muted" style="padding:28px">No billing history yet</td></tr>`;
+    return;
+  }
+  tbody.innerHTML = data.map(s => `
+    <tr>
+      <td><code style="font-size:.78rem">${s.session_code}</code></td>
+      <td><strong>${s.customer_name}</strong></td>
+      <td><span style="background:var(--primary);color:#fff;padding:2px 8px;border-radius:6px;font-size:.78rem;font-weight:600">${s.pc_label}</span></td>
+      <td class="text-muted text-sm">${s.started_at || "—"}</td>
+      <td style="font-family:monospace">${fmtSec(s.elapsed_seconds)}</td>
+      <td>${peso(s.internet_charge)}</td>
+      <td>${peso(s.print_charge)}</td>
+      <td class="fw-bold" style="color:var(--primary)">${peso(s.total)}</td>
+      <td><span class="badge badge-${s.status}">${s.status.charAt(0).toUpperCase()+s.status.slice(1)}</span></td>
+      <td><button class="btn btn-secondary btn-sm" onclick="openReceipt(${s.id})">View</button></td>
+    </tr>`).join("");
+}
+
+function filterHistory() {
+  const q = document.getElementById("history-search").value.toLowerCase();
+  renderHistory(historyData.filter(s =>
+    s.customer_name.toLowerCase().includes(q) ||
+    s.session_code.toLowerCase().includes(q)  ||
+    s.pc_label.toLowerCase().includes(q)
+  ));
+}
+
+// ── Revenue Chart ──────────────────────────────────────────────────────────
+async function loadChart() {
+  const res  = await fetch("/api/billing/daily");
+  const data = await res.json();
+  const labels   = data.map(d => d.date);
+  const internet = data.map(d => d.internet);
+  const printing = data.map(d => d.printing);
+
+  if (barChart) { barChart.destroy(); barChart = null; }
+
+  barChart = new Chart(document.getElementById("revenueBar"), {
+    type: "bar",
+    data: {
+      labels,
+      datasets: [
+        { label:"Internet (₱)", data:internet, backgroundColor:"#304674", borderRadius:6 },
+        { label:"Printing (₱)", data:printing, backgroundColor:"#98bad5", borderRadius:6 }
+      ]
+    },
+    options: {
+      responsive:true, maintainAspectRatio:false,
+      plugins: { legend:{ position:"bottom", labels:{ color:"#304674", font:{weight:"600"} } },
+                 tooltip:{ callbacks:{ label: ctx => "₱" + ctx.raw.toFixed(2) } } },
+      scales: {
+        x: { grid:{ color:"#c6d3e3" }, stacked:false },
+        y: { grid:{ color:"#c6d3e3" }, ticks:{ callback: v => "₱"+v } }
+      }
+    }
+  });
+}
+
+// ── Rate Config ────────────────────────────────────────────────────────────
+async function loadConfig() {
+  const res = await fetch("/api/billing/config");
+  const d   = await res.json();
+  document.getElementById("cfg-internet").value    = d.internet_rate;
+  document.getElementById("cfg-print-bw").value    = d.print_rate_bw   || 3;
+  document.getElementById("cfg-print-color").value = d.print_rate_color || 5;
+}
+
+async function saveRates() {
+  const internet_rate    = parseFloat(document.getElementById("cfg-internet").value)    || 20;
+  const print_rate_bw    = parseFloat(document.getElementById("cfg-print-bw").value)    || 3;
+  const print_rate_color = parseFloat(document.getElementById("cfg-print-color").value) || 5;
+  const res  = await fetch("/api/billing/config", {
+    method:"POST", headers:{"Content-Type":"application/json"},
+    body: JSON.stringify({ internet_rate, print_rate_bw, print_rate_color })
+  });
+  const data = await res.json();
+  showToast(
+    "Rates saved & pushed — Internet: ₱" + data.internet_rate + "/hr | " +
+    "B&W: ₱" + data.print_rate_bw + "/page | Color: ₱" + data.print_rate_color + "/page",
+    "success", 5000
+  );
+  loadSummary();
+}
+
+// ── Receipt Modal ──────────────────────────────────────────────────────────
+async function openReceipt(sessionId) {
+  const res  = await fetch("/api/billing/session/" + sessionId);
+  const s    = await res.json();
+  currentSession = s;
+
+  document.getElementById("r-code").textContent  = s.session_code;
+  document.getElementById("r-cust").textContent  = s.customer_name;
+  document.getElementById("r-pc").textContent    = s.pc_label;
+  document.getElementById("r-date").textContent  = s.started_at ? s.started_at.split(" ")[0] : "—";
+  document.getElementById("r-start").textContent = s.started_at || "—";
+  document.getElementById("r-end").textContent   = s.ended_at   || "Active";
+  document.getElementById("r-dur").textContent   = fmtSec(s.elapsed_seconds);
+  document.getElementById("r-inet").textContent  = peso(s.internet_charge);
+  document.getElementById("r-prt").textContent   = peso(s.print_charge);
+  document.getElementById("r-tot").textContent   = peso(s.total);
+
+  const paidStamp  = document.getElementById("r-paid-stamp");
+  const btnPaid    = document.getElementById("btn-mark-paid");
+  if (s.paid || s.status === "paid") {
+    paidStamp.style.display = "block";
+    btnPaid.style.display   = "none";
+  } else {
+    paidStamp.style.display = "none";
+    btnPaid.style.display   = "flex";
+  }
+
+  document.getElementById("receipt-modal").classList.add("active");
+}
+
+function closeReceipt() {
+  document.getElementById("receipt-modal").classList.remove("active");
+  currentSession = null;
+}
+
+async function markPaid() {
+  if (!currentSession) return;
+  const res  = await fetch("/api/billing/mark-paid", {
+    method:"POST", headers:{"Content-Type":"application/json"},
+    body: JSON.stringify({ session_id: currentSession.id })
+  });
+  const data = await res.json();
+  if (data.error) { showToast(data.error, "error"); return; }
+  showToast(currentSession.session_code + " marked as PAID — " + peso(currentSession.total), "success");
+  closeReceipt();
+  loadAll();
+}
+
+async function quickPay(sessionId) {
+  const res  = await fetch("/api/billing/mark-paid", {
+    method:"POST", headers:{"Content-Type":"application/json"},
+    body: JSON.stringify({ session_id: sessionId })
+  });
+  const data = await res.json();
+  if (data.error) { showToast(data.error, "error"); return; }
+  showToast("Session marked as paid!", "success");
+  loadAll();
+}
+
+// ── Helpers ────────────────────────────────────────────────────────────────
+function peso(v) { return "₱" + parseFloat(v||0).toFixed(2); }
+function fmtSec(s) {
+  s = parseInt(s||0);
+  const h = Math.floor(s/3600), m = Math.floor((s%3600)/60), sec = s%60;
+  return String(h).padStart(2,"0")+":"+String(m).padStart(2,"0")+":"+String(sec).padStart(2,"0");
+}
+
+// Close modal on overlay click
+document.getElementById("receipt-modal").addEventListener("click", e => {
+  if (e.target === document.getElementById("receipt-modal")) closeReceipt();
+});
+
+// SocketIO
+icms.on("pc_update",      () => loadSummary());
+icms.on("session_ended",  () => { loadSummary(); loadUnpaid(); });
+icms.on("connect",        () => loadAll());
+icms.on("rates_updated", (d) => {
+  loadSummary();
+  loadConfig();
+  showToast("Rates saved — Internet: ₱"+parseFloat(d.internet_rate||20).toFixed(2)+"/hr · B&W: ₱"+parseFloat(d.print_rate_bw||3)+"/p · Color: ₱"+parseFloat(d.print_rate_color||5)+"/p", "success", 5000);
+});
+icms.on("client_end_request",(data)=>{ showToast("⚠ "+data.customer_name+" ("+data.pc_label+") requested session end","warning",8000); loadSummary(); loadUnpaid(); });
+
+// Initial load
+loadAll();
+</script>
+{% endblock %}

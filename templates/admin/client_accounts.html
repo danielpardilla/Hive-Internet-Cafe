@@ -1,0 +1,425 @@
+{% extends "admin/base.html" %}
+{% block title %}Client Accounts — ICMS-ASI{% endblock %}
+
+{% block content %}
+<style>
+  /* Modern Input and Select Fields */
+  .form-group input[type="text"],
+  .form-group input[type="password"],
+  .form-group select {
+    width: 100%;
+    padding: 10px 14px;
+    font-size: 0.95rem;
+    border: 1px solid #d1d5db;
+    border-radius: 6px;
+    background-color: #fff;
+    color: #1f2937;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+    box-sizing: border-box;
+  }
+  
+  .form-group input:focus,
+  .form-group select:focus {
+    outline: none;
+    border-color: var(--primary, #304674);
+    box-shadow: 0 0 0 3px rgba(48, 70, 116, 0.15);
+  }
+
+  .form-group label {
+    display: block;
+    margin-bottom: 6px;
+    font-weight: 500;
+    font-size: 0.9rem;
+    color: #374151;
+  }
+
+  .form-group {
+    margin-bottom: 1.25rem;
+  }
+
+  /* Polished Reset Password Modal Styling */
+  .modal-overlay {
+    display: none;
+    position: fixed;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: rgba(15, 23, 42, 0.6);
+    backdrop-filter: blur(4px);
+    z-index: 1000;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s ease;
+  }
+
+  .modal-card {
+    background: #fff;
+    border-radius: 12px;
+    box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+    width: 90%;
+    max-width: 420px;
+    overflow: hidden;
+    border: 1px solid rgba(0, 0, 0, 0.05);
+    position: relative;
+  }
+
+  .modal-header {
+    padding: 18px 24px;
+    border-bottom: 1px solid #f3f4f6;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    background: #fafafa;
+  }
+
+  .modal-close-btn {
+    background: none;
+    border: none;
+    cursor: pointer;
+    font-size: 20px;
+    line-height: 1;
+    color: #9ca3af;
+    padding: 4px;
+    border-radius: 4px;
+    transition: background 0.15s, color 0.15s;
+  }
+
+  .modal-close-btn:hover {
+    background: #f3f4f6;
+    color: #4b5563;
+  }
+
+  .modal-body {
+    padding: 24px;
+  }
+
+  .modal-actions {
+    display: flex;
+    gap: 12px;
+    margin-top: 1.5rem;
+  }
+
+  .form-group input:disabled {
+    background-color: #f3f4f6 !important;
+    color: #6b7280;
+    cursor: not-allowed;
+    border-color: #e5e7eb;
+  }
+</style>
+
+<div class="page-header">
+  <h1>Client Account Management</h1>
+  <p>Create and manage customer login accounts for PCs</p>
+</div>
+
+<div class="grid-2 mb-3">
+  <div class="card">
+    <div class="card-header">
+      <span class="card-title">Create New Account</span>
+    </div>
+    <form id="createAccountForm" novalidate style="padding: 20px;">
+      <div class="form-group">
+        <label>Assign to PC <span style="color:var(--text-light);font-size:0.85rem">(optional)</span></label>
+        <select id="pcSelect" name="pcSelect">
+          <option value="">— None (Any PC) —</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Customer Name</label>
+        <input type="text" id="clientName" placeholder="e.g., John Doe" required>
+      </div>
+      <div class="form-group">
+        <label>Password</label>
+        <input type="password" id="clientPassword" placeholder="Enter password" required>
+      </div>
+      <button type="submit" class="btn btn-primary btn-block">Create Account</button>
+    </form>
+  </div>
+
+  <div class="card">
+    <div class="card-header">
+      <span class="card-title">Quick Info</span>
+    </div>
+    <div style="padding: 16px; color: var(--text-mid); font-size: 0.9rem; line-height: 1.6">
+      <p><strong>How it works:</strong></p>
+      <ul style="margin: 12px 0; padding-left: 20px;">
+        <li><strong>PC-specific account:</strong> Select a PC to restrict login to that workstation</li>
+        <li><strong>Any-PC Account:</strong> allows login from any workstation</li>
+        <li>Customer logs in with their name & password</li>
+        <li>Names are case-insensitive (first name match OK)</li>
+        <li>Create same account on multiple PCs for PC-specific multi-location access</li>
+        <li>Deactivate accounts when no longer needed</li>
+      </ul>
+      <div style="background: rgba(48, 70, 116, 0.05); padding: 12px; border-radius: 6px; margin-top: 12px;">
+        <strong style="display:block;margin-bottom:4px">Tip:</strong>
+        <span style="font-size:0.85rem">Leave PC empty for flexible access (one account, any PC). Assign to PC for restricted access (one account per location).</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-header flex items-center gap-1" style="justify-content:space-between">
+    <div class="flex items-center gap-1">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--primary)" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg>
+      <span class="card-title">Active Accounts</span>
+    </div>
+    <button class="btn btn-secondary btn-sm" onclick="loadAccounts()">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+      Refresh
+    </button>
+  </div>
+  <div class="table-wrapper">
+    <table>
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>PC</th>
+          <th>Created</th>
+          <th>Status</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody id="accountsTableBody">
+        <tr><td colspan="5" class="text-center text-muted" style="padding:28px">Loading accounts...</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<div id="resetModal" class="modal-overlay">
+  <div class="modal-card">
+    <div class="modal-header">
+      <span class="card-title" style="margin:0; font-weight:600; font-size:1.1rem; color:var(--text-dark, #111827);">Reset Password</span>
+      <button onclick="closeResetModal()" class="modal-close-btn" aria-label="Close modal">×</button>
+    </div>
+    <form id="resetForm" class="modal-body">
+      <div class="form-group">
+        <label>Account</label>
+        <input type="text" id="resetAccountName" disabled>
+      </div>
+      <div class="form-group">
+        <label>New Password</label>
+        <input type="password" id="newPassword" placeholder="Enter new password" required autofocus>
+      </div>
+      <div class="modal-actions">
+        <button type="submit" class="btn btn-primary" style="flex:1">Reset Password</button>
+        <button type="button" onclick="closeResetModal()" class="btn btn-secondary" style="flex:1">Cancel</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block extra_js %}
+<script>
+let allAccounts = [];
+let resetAccountId = null;
+
+async function loadPCs() {
+  try {
+    const res = await fetch("/api/pcs");
+    if (!res.ok) throw new Error("Failed to load PCs");
+    const pcs = await res.json();
+    const select = document.getElementById("pcSelect");
+    select.innerHTML = '<option value="">— None (Any PC) —</option>';
+    pcs.forEach(pc => {
+      const opt = document.createElement("option");
+      opt.value = pc.id;
+      opt.textContent = pc.label;
+      select.appendChild(opt);
+    });
+  } catch(e) {
+    console.error("Failed to load PCs:", e);
+  }
+}
+
+async function loadAccounts() {
+  try {
+    const res = await fetch("/api/client-accounts");
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    const accounts = await res.json();
+    allAccounts = accounts;
+    renderAccountsTable(accounts);
+  } catch(e) {
+    showToast("Failed to load accounts", "error");
+    console.error(e);
+  }
+}
+
+function renderAccountsTable(accounts) {
+  const tbody = document.getElementById("accountsTableBody");
+  if (!accounts.length) {
+    tbody.innerHTML = `<tr><td colspan="5" class="text-center text-muted" style="padding:28px">No accounts yet. Create one above.</td></tr>`;
+    return;
+  }
+  tbody.innerHTML = accounts.map(acc => {
+    const safeName = escapeHtml(acc.name).replace(/'/g, "&#39;");
+    const pcLabel = acc.pc_label === "—" ? "Any PC" : escapeHtml(acc.pc_label);
+    const statusBadge = acc.active
+      ? '<span class="badge" style="background:#d4edda;color:#155724">Active</span>'
+      : '<span class="badge" style="background:#f8d7da;color:#721c24">Inactive</span>';
+    const toggleBtn = acc.active
+      ? `<button class="btn btn-sm" style="background:#f8d7da;color:#721c24" onclick="deactivateAccount(${acc.id}, '${safeName}')">Deactivate</button>`
+      : `<button class="btn btn-sm" style="background:#d4edda;color:#155724" onclick="reactivateAccount(${acc.id}, '${safeName}')">Reactivate</button>`;
+    return `
+    <tr>
+      <td><strong>${escapeHtml(acc.name)}</strong></td>
+      <td><span style="background:var(--primary);color:#fff;padding:3px 10px;border-radius:6px;font-size:.8rem;font-weight:600">${pcLabel}</span></td>
+      <td class="text-muted">${acc.created_at || "—"}</td>
+      <td>${statusBadge}</td>
+      <td style="display:flex;gap:6px;flex-wrap:wrap">
+        <button class="btn btn-sm btn-secondary" onclick="openResetModal(${acc.id}, '${safeName}')">Reset PW</button>
+        ${toggleBtn}
+        <button class="btn btn-sm" style="background:#dc3545;color:#fff" onclick="deleteAccount(${acc.id}, '${safeName}')">Delete</button>
+      </td>
+    </tr>`;
+  }).join("");
+}
+
+function openResetModal(id, name) {
+  resetAccountId = id;
+  document.getElementById("resetAccountName").value = name;
+  document.getElementById("newPassword").value = "";
+  document.getElementById("resetModal").style.display = "flex";
+  setTimeout(() => document.getElementById("newPassword").focus(), 100);
+}
+
+function closeResetModal() {
+  document.getElementById("resetModal").style.display = "none";
+  resetAccountId = null;
+}
+
+async function safeJson(res) {
+  const text = await res.text();
+  try {
+    return JSON.parse(text);
+  } catch {
+    if (res.status === 401 || res.redirected) {
+      showToast("Session expired. Please log in again.", "error");
+      setTimeout(() => window.location.href = "/login", 1500);
+    }
+    throw new Error("Unexpected server response (status " + res.status + ")");
+  }
+}
+
+async function createAccount(e) {
+  e.preventDefault();
+  const pcSelectEl = document.getElementById("pcSelect");
+  const pcId = pcSelectEl.value;
+  const name = document.getElementById("clientName").value.trim();
+  const password = document.getElementById("clientPassword").value.trim();
+
+  if (!name) { showToast("Customer name is required", "warning"); return; }
+  if (!password) { showToast("Password is required", "warning"); return; }
+
+  const payload = {
+    pc_id: pcId !== "" ? parseInt(pcId, 10) : null,
+    name,
+    password
+  };
+
+  try {
+    const res = await fetch("/api/client-accounts", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    });
+    const data = await safeJson(res);
+    if (!res.ok) { showToast(data.error || "Failed to create account", "error"); return; }
+
+    const pcLabel = payload.pc_id ? (data.account?.pc_label || "PC") : "Any PC";
+    showToast(`Account '${name}' created (${pcLabel})`, "success");
+    document.getElementById("clientName").value = "";
+    document.getElementById("clientPassword").value = "";
+    pcSelectEl.value = "";
+    loadAccounts();
+  } catch(err) {
+    showToast("Error creating account: " + err.message, "error");
+    console.error(err);
+  }
+}
+
+async function resetPassword(e) {
+  e.preventDefault();
+  if (!resetAccountId) return;
+  const newPassword = document.getElementById("newPassword").value.trim();
+  if (!newPassword) { showToast("Password is required", "warning"); return; }
+
+  try {
+    const res = await fetch(`/api/client-accounts/${resetAccountId}/reset-password`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ password: newPassword })
+    });
+    const data = await safeJson(res);
+    if (!res.ok) { showToast(data.error || "Failed to reset password", "error"); return; }
+    showToast("Password reset successfully", "success");
+    closeResetModal();
+  } catch(err) {
+    showToast("Error resetting password: " + err.message, "error");
+    console.error(err);
+  }
+}
+
+async function deactivateAccount(id, name) {
+  if (!confirm(`Deactivate account for '${name}'? They won't be able to log in.`)) return;
+  try {
+    const res = await fetch(`/api/client-accounts/${id}`, { method: "DELETE" });
+    const data = await safeJson(res);
+    if (!res.ok) { showToast(data.error || "Failed to deactivate", "error"); return; }
+    showToast(`Account '${name}' deactivated`, "success");
+    loadAccounts();
+  } catch(err) {
+    showToast("Error deactivating account: " + err.message, "error");
+    console.error(err);
+  }
+}
+
+async function reactivateAccount(id, name) {
+  if (!confirm(`Reactivate account for '${name}'?`)) return;
+  try {
+    const res = await fetch(`/api/client-accounts/${id}/reactivate`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" }
+    });
+    const data = await safeJson(res);
+    if (!res.ok) { showToast(data.error || "Failed to reactivate", "error"); return; }
+    showToast(`Account '${name}' reactivated`, "success");
+    loadAccounts();
+  } catch(err) {
+    showToast("Error reactivating account: " + err.message, "error");
+    console.error(err);
+  }
+}
+
+async function deleteAccount(id, name) {
+  if (!confirm(`Permanently DELETE account for '${name}'? This cannot be undone.`)) return;
+  if (!confirm(`Are you SURE? This will permanently remove '${name}' from the system.`)) return;
+  try {
+    const res = await fetch(`/api/client-accounts/${id}/delete`, { method: "POST" });
+    const data = await safeJson(res);
+    if (!res.ok) { showToast(data.error || "Failed to delete account", "error"); return; }
+    showToast(`Account '${name}' permanently deleted`, "success");
+    loadAccounts();
+  } catch(err) {
+    showToast("Error deleting account: " + err.message, "error");
+    console.error(err);
+  }
+}
+
+function escapeHtml(text) {
+  const div = document.createElement("div");
+  div.textContent = String(text);
+  return div.innerHTML;
+}
+
+window.addEventListener("load", () => {
+  document.getElementById("createAccountForm").addEventListener("submit", createAccount);
+  document.getElementById("resetForm").addEventListener("submit", resetPassword);
+  loadPCs();
+  loadAccounts();
+});
+
+setInterval(loadAccounts, 30000);
+</script>
+{% endblock %}

@@ -1,0 +1,150 @@
+{% extends "admin/base.html" %}
+{% block title %}Print Queue — ICMS-ASI{% endblock %}
+{% block extra_css %}
+<style>
+  .pq-tabs{display:flex;gap:4px;margin-bottom:20px;}
+  .pq-tab{padding:8px 20px;border-radius:var(--radius);border:1.5px solid var(--accent);background:var(--white);font-size:.875rem;font-weight:600;color:var(--text-mid);cursor:pointer;transition:all .18s;}
+  .pq-tab.active{background:var(--primary);color:var(--white);border-color:var(--primary);}
+  .pq-panel{display:none;} .pq-panel.active{display:block;}
+  .queue-card{background:var(--white);border-radius:var(--radius-lg);padding:18px 20px;box-shadow:var(--shadow);display:flex;align-items:center;gap:14px;margin-bottom:10px;border-left:4px solid var(--accent);transition:all .2s;}
+  .queue-card.pending{border-color:var(--warning);}
+  .queue-card.processing{border-color:var(--info);background:#f0f8ff;}
+  .qc-num{width:36px;height:36px;border-radius:50%;background:var(--primary);color:#fff;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:.9rem;flex-shrink:0;}
+  .qc-info{flex:1;min-width:0;}
+  .qc-name{font-weight:700;font-size:.9rem;color:var(--primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .qc-meta{font-size:.75rem;color:var(--text-light);margin-top:3px;display:flex;flex-wrap:wrap;gap:4px;}
+  .qc-tag{background:var(--surface);padding:1px 7px;border-radius:4px;font-size:.7rem;font-weight:600;}
+  .qc-tag-color{background:#fde68a;color:#92400e;}
+  .qc-price{font-weight:700;color:var(--primary);font-size:1rem;white-space:nowrap;}
+  .qc-actions{display:flex;gap:6px;flex-wrap:wrap;}
+  .stat-strip{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:20px;}
+  @media(max-width:900px){.stat-strip{grid-template-columns:repeat(2,1fr);}}
+  .ss-card{background:var(--white);border-radius:var(--radius-lg);padding:14px 18px;box-shadow:var(--shadow);}
+  .ss-card .lbl{font-size:.72rem;color:var(--text-light);text-transform:uppercase;letter-spacing:.05em;}
+  .ss-card .val{font-size:1.5rem;font-weight:700;color:var(--primary);}
+  .file-icon{width:36px;height:36px;border-radius:8px;display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:.65rem;font-weight:700;}
+  .fi-pdf{background:#fee2e2;color:#c53030;} .fi-docx{background:#dbeafe;color:#1e40af;} .fi-img{background:#d1fae5;color:#065f46;}
+  .rate-badge{background:var(--primary);color:#fff;padding:2px 8px;border-radius:12px;font-size:.7rem;font-weight:700;}
+</style>
+{% endblock %}
+{% block content %}
+<div class="page-header" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px">
+  <div>
+    <h1>Print Queue</h1>
+    <p>FIFO management — process jobs in order &nbsp;
+      B&W <span class="rate-badge" id="pq-rate-bw">₱3/p</span>
+      Color <span class="rate-badge" id="pq-rate-color">₱5/p</span>
+    </p>
+  </div>
+  <button class="btn btn-secondary btn-sm" onclick="loadAll()">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg> Refresh
+  </button>
+</div>
+<div class="stat-strip">
+  <div class="ss-card"><div class="lbl">Pending</div><div class="val" id="st-pending" style="color:var(--warning)">0</div></div>
+  <div class="ss-card"><div class="lbl">Processing</div><div class="val" id="st-processing" style="color:var(--info)">0</div></div>
+  <div class="ss-card"><div class="lbl">Done Today</div><div class="val" id="st-done" style="color:var(--success)">0</div></div>
+  <div class="ss-card" style="background:var(--grad-primary)"><div class="lbl" style="color:rgba(255,255,255,.7)">In Queue</div><div class="val" id="st-total" style="color:white">0</div></div>
+</div>
+<div class="pq-tabs">
+  <button class="pq-tab active" onclick="switchTab('queue')">Active Queue</button>
+  <button class="pq-tab"        onclick="switchTab('history')">History</button>
+</div>
+<div class="pq-panel active" id="tab-queue">
+  <div id="queue-list"><div style="text-align:center;padding:48px;color:var(--text-light)"><span class="spinner" style="margin:0 auto"></span><p style="margin-top:12px">Loading...</p></div></div>
+</div>
+<div class="pq-panel" id="tab-history">
+  <div class="card">
+    <div class="card-header"><span class="card-title">Completed Jobs</span></div>
+    <div class="table-wrapper">
+      <table>
+        <thead><tr><th>#</th><th>File</th><th>Customer</th><th>PC</th><th>Details</th><th>Note</th><th>Charge</th><th>Time</th><th>Status</th></tr></thead>
+        <tbody id="history-tbody"><tr><td colspan="8" class="text-center text-muted" style="padding:28px">No history yet</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% endblock %}
+{% block extra_js %}
+<script>
+function switchTab(tab){
+  document.querySelectorAll(".pq-tab").forEach((b,i)=>b.classList.toggle("active",["queue","history"][i]===tab));
+  document.querySelectorAll(".pq-panel").forEach(p=>p.classList.remove("active"));
+  document.getElementById("tab-"+tab).classList.add("active");
+  if(tab==="history") loadHistory();
+}
+function fileIcon(t){ if(t==="pdf") return `<div class="file-icon fi-pdf">PDF</div>`; if(t==="docx") return `<div class="file-icon fi-docx">DOC</div>`; return `<div class="file-icon fi-img">IMG</div>`; }
+
+async function loadStats(){ const res=await fetch("/api/print/stats"); const d=await res.json(); document.getElementById("st-pending").textContent=d.pending; document.getElementById("st-processing").textContent=d.processing; document.getElementById("st-done").textContent=d.done_today; document.getElementById("st-total").textContent=d.total_queue; }
+
+async function loadRates(){ try{ const res=await fetch("/api/rates"); const d=await res.json(); document.getElementById("pq-rate-bw").textContent="₱"+d.print_rate_bw+"/p"; document.getElementById("pq-rate-color").textContent="₱"+d.print_rate_color+"/p"; }catch(e){} }
+
+async function loadQueue(){
+  const res=await fetch("/api/print/queue"); const jobs=await res.json();
+  const el=document.getElementById("queue-list");
+  if(!jobs.length){ el.innerHTML=`<div style="text-align:center;padding:56px;color:var(--text-light)"><svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="var(--secondary)" stroke-width="1.5" style="display:block;margin:0 auto 12px"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg><p style="font-weight:600;font-size:1rem;color:var(--primary)">Queue is empty</p><p class="text-sm">Print jobs from clients will appear here</p></div>`; return; }
+  el.innerHTML=jobs.map((j,idx)=>`
+    <div class="queue-card ${j.status}">
+      <div class="qc-num">${idx+1}</div>
+      ${fileIcon(j.file_type)}
+      <div class="qc-info">
+        <div class="qc-name">${j.filename}</div>
+        <div class="qc-meta">
+          <strong>${j.customer_name}</strong>
+          <span style="background:var(--primary);color:#fff;padding:1px 7px;border-radius:5px;font-size:.7rem;font-weight:600">${j.pc_label}</span>
+          <span class="qc-tag ${j.color_mode==='Color'?'qc-tag-color':''}">${j.color_mode||'B&W'}</span>
+          <span class="qc-tag">${j.paper_size||'Short'}</span>
+          <span class="qc-tag">${j.targeted_pages||j.pages}p × ${j.copies_count||1} cop${(j.copies_count||1)>1?'ies':'y'}</span>
+          <span class="qc-tag">Range: ${j.page_range||'All'}</span>
+          <span style="color:var(--text-light)">${j.created_at||'—'}</span>
+          ${j.note?`<span class="qc-tag" style="background:#fef9c3;color:#854d0e;border:1px solid #fde68a">📝 ${j.note}</span>`:''}
+        </div>
+      </div>
+      <span class="badge badge-${j.status==='pending'?'pending':'processing'}">${j.status.toUpperCase()}</span>
+      <span class="qc-price">₱${parseFloat(j.charge).toFixed(2)}</span>
+      <div class="qc-actions">
+        <a href="/api/print/download/${j.id}" class="btn btn-secondary btn-sm" download title="Download file">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+        </a>
+        ${j.status==='pending'?`<button class="btn btn-primary btn-sm" onclick="processJob(${j.id})"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polygon points="5 3 19 12 5 21 5 3"/></svg> Process</button>`:''}
+        ${j.status==='processing'?`<button class="btn btn-success btn-sm" onclick="doneJob(${j.id})"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg> Done</button>`:''}
+        <button class="btn btn-secondary btn-sm" onclick="cancelJob(${j.id})">✕</button>
+      </div>
+    </div>`).join("");
+}
+
+async function loadHistory(){
+  const res=await fetch("/api/print/history"); const jobs=await res.json();
+  const tbody=document.getElementById("history-tbody");
+  if(!jobs.length){ tbody.innerHTML=`<tr><td colspan="8" class="text-center text-muted" style="padding:28px">No completed jobs yet</td></tr>`; return; }
+  tbody.innerHTML=jobs.map(j=>`<tr>
+    <td class="text-muted text-sm">#${j.id}</td>
+    <td><div style="display:flex;align-items:center;gap:8px">${fileIcon(j.file_type)}<span style="font-size:.82rem;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${j.filename}</span></div></td>
+    <td><strong>${j.customer_name}</strong></td>
+    <td><span style="background:var(--primary);color:#fff;padding:2px 8px;border-radius:6px;font-size:.75rem;font-weight:600">${j.pc_label}</span></td>
+    <td class="text-sm">${j.targeted_pages||j.pages}p×${j.copies_count||1} · ${j.color_mode||'B&W'} · ${j.paper_size||'Short'}</td>
+    <td class="fw-bold" style="color:var(--primary)">₱${parseFloat(j.charge).toFixed(2)}</td>
+    <td class="text-sm" style="max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${j.note||''}"><em style="color:var(--text-mid)">${j.note||'—'}</em></td>
+    <td class="text-muted text-sm">${j.processed_at||j.created_at||'—'}</td>
+    <td><div style="display:flex;gap:4px;align-items:center">
+      <span class="badge badge-${j.status==='done'?'completed':'idle'}">${j.status.toUpperCase()}</span>
+      <a href="/api/print/download/${j.id}" class="btn btn-secondary btn-sm" download title="Download">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+      </a>
+    </div></td>
+  </tr>`).join("");
+}
+
+async function processJob(id){ const res=await fetch(`/api/print/process/${id}`,{method:"POST"}); const d=await res.json(); if(d.error){showToast(d.error,"error");return;} showToast(`Job #${id} processing`,"info"); loadAll(); }
+async function doneJob(id){ const res=await fetch(`/api/print/done/${id}`,{method:"POST"}); const d=await res.json(); if(d.error){showToast(d.error,"error");return;} showToast(`Job #${id} done — ₱${parseFloat(d.job.charge).toFixed(2)}`,"success"); loadAll(); }
+async function cancelJob(id){ if(!confirm("Cancel this print job?"))return; const res=await fetch(`/api/print/cancel/${id}`,{method:"POST"}); const d=await res.json(); if(d.error){showToast(d.error,"error");return;} showToast(`Job #${id} cancelled`,"warning"); loadAll(); }
+async function loadAll(){ await Promise.all([loadStats(),loadQueue(),loadRates()]); }
+
+icms.on("print_job_added",()=>{ loadAll(); showToast("New print job received!","info"); });
+icms.on("print_job_updated",()=>loadAll());
+icms.on("rates_updated",(d)=>{ if(d.print_rate_bw) document.getElementById("pq-rate-bw").textContent="₱"+d.print_rate_bw+"/p"; if(d.print_rate_color) document.getElementById("pq-rate-color").textContent="₱"+d.print_rate_color+"/p"; });
+icms.on("client_end_request",(data)=>{ showToast("⚠ "+data.customer_name+" ("+data.pc_label+") requested to end session!","warning",8000); });
+icms.on("connect",()=>loadAll());
+loadAll();
+</script>
+{% endblock %}
